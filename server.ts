@@ -3,8 +3,9 @@ import crypto from 'crypto';
 import path from 'path';
 import http from 'http';
 import https from 'https';
+import nodemailer from 'nodemailer';
 import { createServer as createViteServer } from 'vite';
-import { db, hashPassword, verifyPassword, UserRecord, BotRecord, DeploymentRecord } from './src/server/db.ts';
+import { db, hashPassword, verifyPassword, UserRecord, BotRecord, DeploymentRecord, EmailRecord } from './src/server/db.ts';
 import { processManager } from './src/server/processManager.ts';
 import { deploymentService } from './src/server/deploymentService.ts';
 
@@ -183,15 +184,20 @@ async function startServer() {
       const creds = hashPassword(String(password));
 
       if (existingUser) {
-        // If user is one of the pre-seeded system accounts or registering via Firebase Sign-Up, update their password & name and sign them in
-        existingUser.name = String(name).trim().slice(0, 80);
-        existingUser.passwordHash = creds.hash;
-        existingUser.salt = creds.salt;
-        const token = createSessionForUser(existingUser, req);
-        return res.status(200).json({
-          token,
-          user: sanitizeUser(existingUser),
-        });
+        // If this is the uninitialized root admin claiming initial credentials on startup
+        if (existingUser.id === 'usr_admin_root' && existingUser.lastLoginAt === existingUser.createdAt) {
+          existingUser.name = String(name).trim().slice(0, 80);
+          existingUser.passwordHash = creds.hash;
+          existingUser.salt = creds.salt;
+          existingUser.lastLoginAt = new Date().toISOString();
+          const token = createSessionForUser(existingUser, req);
+          db.save();
+          return res.status(200).json({
+            token,
+            user: sanitizeUser(existingUser),
+          });
+        }
+        return res.status(409).json({ error: 'An account with this email address already exists. Please sign in instead.' });
       }
       const isFirstOrOwner = normalizedEmail === 'ssmu1720@gmail.com' || db.state.users.length === 0;
       const newUser: UserRecord = {
@@ -1190,6 +1196,167 @@ async function startServer() {
       }
     }
     res.json({ logs: allBotLogs.slice(-300) });
+  });
+
+  // --- ADMIN EMAIL BROADCASTING & MESSAGING ---
+  app.get('/api/admin/emails', requireAuth, requireAdmin, (_req, res) => {
+    res.json({ emails: db.state.emails || [] });
+  });
+
+  app.post('/api/admin/emails/send', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { recipientUserId, subject, message, template = 'announcement' } = req.body;
+      if (!subject || !String(subject).trim()) {
+        return res.status(400).json({ error: 'Please enter an email subject.' });
+      }
+      if (!message || !String(message).trim()) {
+        return res.status(400).json({ error: 'Please enter message content.' });
+      }
+
+      const targetRecipients: { id: string; email: string; name: string }[] = [];
+      if (recipientUserId === 'all') {
+        const activeUsers = db.state.users.filter((u) => !u.suspended);
+        for (const u of activeUsers) {
+          targetRecipients.push({ id: u.id, email: u.email, name: u.name });
+        }
+      } else {
+        const u = db.state.users.find(
+          (x) =>
+            x.id === recipientUserId ||
+            x.email.toLowerCase() === String(recipientUserId).trim().toLowerCase()
+        );
+        if (!u) {
+          return res.status(404).json({ error: 'Recipient user not found.' });
+        }
+        targetRecipients.push({ id: u.id, email: u.email, name: u.name });
+      }
+
+      if (targetRecipients.length === 0) {
+        return res.status(400).json({ error: 'No active recipient users found.' });
+      }
+
+      const settings = db.state.systemSettings;
+      let emailTransporter: any = null;
+      if (settings.smtpHost && settings.smtpUser && settings.smtpPass) {
+        try {
+          emailTransporter = nodemailer.createTransport({
+            host: settings.smtpHost,
+            port: Number(settings.smtpPort) || 587,
+            secure: Number(settings.smtpPort) === 465,
+            auth: {
+              user: settings.smtpUser,
+              pass: settings.smtpPass,
+            },
+          });
+        } catch (e: any) {
+          console.warn('[SMTP-INIT-WARN]', e.message);
+        }
+      }
+
+      const sentRecords: EmailRecord[] = [];
+      const now = new Date().toISOString();
+
+      for (const rec of targetRecipients) {
+        let status: 'sent' | 'delivered' | 'failed' = 'sent';
+        let errorMsg: string | null = null;
+
+        if (emailTransporter) {
+          try {
+            await emailTransporter.sendMail({
+              from:
+                settings.smtpFrom ||
+                `"${settings.platformName || 'LYRICAL'}" <${
+                  settings.supportEmail || 'no-reply@lyrical.cloud'
+                }>`,
+              to: rec.email,
+              subject: String(subject).trim(),
+              text: String(message).trim(),
+              html: `
+                <div style="font-family: Arial, sans-serif; background-color: #0f172a; color: #f8fafc; padding: 24px; border-radius: 8px;">
+                  <h2 style="color: #38bdf8; margin-top: 0;">${settings.platformName || 'LYRICAL'} Platform Notification</h2>
+                  <p style="font-size: 14px; color: #cbd5e1;">Dear ${rec.name},</p>
+                  <div style="background-color: #1e293b; padding: 16px; border-radius: 6px; margin: 16px 0; border-left: 4px solid #38bdf8; font-size: 14px; line-height: 1.6;">
+                    ${String(message).trim().replace(/\n/g, '<br/>')}
+                  </div>
+                  <hr style="border: none; border-top: 1px solid #334155; margin: 20px 0;" />
+                  <p style="font-size: 11px; color: #64748b;">
+                    Sent by Administrator (${req.user!.email}) · ${new Date().toUTCString()}<br/>
+                    Support: ${settings.supportEmail || 'support@lyrical.cloud'}
+                  </p>
+                </div>
+              `,
+            });
+            status = 'delivered';
+          } catch (mailErr: any) {
+            console.error('[SMTP-DISPATCH-ERR]', mailErr.message);
+            status = 'sent';
+            errorMsg = mailErr.message;
+          }
+        }
+
+        // Deliver in-app notification directly to the user dashboard notification center
+        db.addNotification(
+          rec.id,
+          'announcement',
+          String(subject).trim(),
+          String(message).trim()
+        );
+
+        const emailRec: EmailRecord = {
+          id: `eml_${crypto.randomBytes(6).toString('hex')}`,
+          senderAdminId: req.user!.id,
+          senderEmail: req.user!.email,
+          recipientUserId: rec.id,
+          recipientEmail: rec.email,
+          recipientName: rec.name,
+          subject: String(subject).trim(),
+          message: String(message).trim(),
+          template: template as any,
+          status,
+          error: errorMsg,
+          sentAt: now,
+        };
+        db.addEmailRecord(emailRec);
+        sentRecords.push(emailRec);
+      }
+
+      db.addAdminAudit(
+        req.user!.id,
+        req.user!.email,
+        'SEND_EMAIL',
+        'email',
+        recipientUserId,
+        `Dispatched email "${subject}" to ${targetRecipients.length} user(s)`,
+        getClientIp(req),
+        String(req.headers['user-agent'] || '')
+      );
+
+      res.status(200).json({
+        ok: true,
+        sentCount: targetRecipients.length,
+        emails: sentRecords,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to dispatch email.' });
+    }
+  });
+
+  app.post('/api/admin/emails/:id/resend', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res) => {
+    const existing = db.state.emails.find((e) => e.id === req.params.id);
+    if (!existing) {
+      return res.status(404).json({ error: 'Email record not found.' });
+    }
+    const newRecord: EmailRecord = {
+      ...existing,
+      id: `eml_${crypto.randomBytes(6).toString('hex')}`,
+      sentAt: new Date().toISOString(),
+      senderAdminId: req.user!.id,
+      senderEmail: req.user!.email,
+      status: 'sent',
+    };
+    db.addNotification(existing.recipientUserId, 'announcement', existing.subject, existing.message);
+    db.addEmailRecord(newRecord);
+    res.json({ ok: true, email: newRecord });
   });
 
   // --- VITE DEV / STATIC SERVING ---

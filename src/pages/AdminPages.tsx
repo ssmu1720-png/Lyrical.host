@@ -17,6 +17,10 @@ import {
   Plus,
   Save,
   ArrowLeft,
+  Mail,
+  Send,
+  Eye,
+  RefreshCw,
 } from 'lucide-react';
 import { apiRequest, formatUptime } from '../lib/api';
 
@@ -1009,6 +1013,84 @@ export const AdminSettingsPage: React.FC<{ onSettingsUpdated?: () => void }> = (
             className="w-full px-3.5 py-2 text-xs font-mono bg-slate-950 border border-slate-800 rounded-lg text-white"
           />
         </div>
+      </div>
+
+      {/* SMTP Gateway Configuration Card */}
+      <div className="p-6 rounded-xl border border-slate-800 bg-slate-900/60 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+              <Mail className="w-4 h-4 text-purple-400" />
+              SMTP Outbound Email Gateway (Optional)
+            </h2>
+            <p className="text-xs text-slate-400">
+              Configure SMTP credentials to dispatch physical emails to users. If left blank, notifications are recorded in the user dashboard and email logs.
+            </p>
+          </div>
+          <Link
+            to="/admin/emails"
+            className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-purple-600/30 border border-purple-500/40 text-purple-300 hover:bg-purple-600/50"
+          >
+            Open Email Center →
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">SMTP Host</label>
+            <input
+              type="text"
+              value={settings.smtpHost || ''}
+              onChange={(e) => setSettings({ ...settings, smtpHost: e.target.value })}
+              placeholder="e.g. smtp.gmail.com or smtp.sendgrid.net"
+              className="w-full px-3.5 py-2 text-xs font-mono bg-slate-950 border border-slate-800 rounded-lg text-white"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">SMTP Port</label>
+            <input
+              type="number"
+              value={settings.smtpPort || 587}
+              onChange={(e) => setSettings({ ...settings, smtpPort: Number(e.target.value) })}
+              placeholder="587 or 465"
+              className="w-full px-3.5 py-2 text-xs font-mono bg-slate-950 border border-slate-800 rounded-lg text-white"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">SMTP Username / Email</label>
+            <input
+              type="text"
+              value={settings.smtpUser || ''}
+              onChange={(e) => setSettings({ ...settings, smtpUser: e.target.value })}
+              placeholder="username@domain.com"
+              className="w-full px-3.5 py-2 text-xs font-mono bg-slate-950 border border-slate-800 rounded-lg text-white"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">SMTP Password / App Key</label>
+            <input
+              type="password"
+              value={settings.smtpPass || ''}
+              onChange={(e) => setSettings({ ...settings, smtpPass: e.target.value })}
+              placeholder="••••••••••••"
+              className="w-full px-3.5 py-2 text-xs font-mono bg-slate-950 border border-slate-800 rounded-lg text-white"
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">From Address / Sender Identity</label>
+            <input
+              type="text"
+              value={settings.smtpFrom || ''}
+              onChange={(e) => setSettings({ ...settings, smtpFrom: e.target.value })}
+              placeholder='"LYRICAL Platform" <no-reply@lyrical-host.up.railway.app>'
+              className="w-full px-3.5 py-2 text-xs font-mono bg-slate-950 border border-slate-800 rounded-lg text-white"
+            />
+          </div>
+        </div>
 
         <div className="pt-2 flex justify-end">
           <button
@@ -1021,5 +1103,532 @@ export const AdminSettingsPage: React.FC<{ onSettingsUpdated?: () => void }> = (
         </div>
       </div>
     </form>
+  );
+};
+
+export const AdminEmailsPage: React.FC = () => {
+  const [emails, setEmails] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Form State
+  const [recipientType, setRecipientType] = useState<'all' | 'specific'>('all');
+  const [selectedUserId, setSelectedUserId] = useState<string>('');
+  const [subject, setSubject] = useState('');
+  const [message, setMessage] = useState('');
+  const [template, setTemplate] = useState<'announcement' | 'warning' | 'account' | 'custom'>('announcement');
+  const [showPreview, setShowPreview] = useState(false);
+  const [activeModalEmail, setActiveModalEmail] = useState<any | null>(null);
+  const [searchFilter, setSearchFilter] = useState('');
+
+  const loadData = async () => {
+    try {
+      const [emailRes, userRes] = await Promise.all([
+        apiRequest('/api/admin/emails'),
+        apiRequest('/api/admin/users'),
+      ]);
+      setEmails(emailRes.emails || []);
+      setUsers(userRes.users || []);
+      if (!selectedUserId && userRes.users && userRes.users.length > 0) {
+        setSelectedUserId(userRes.users[0].id);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Could not load email center data.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const handleSendEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!subject.trim() || !message.trim()) {
+      setError('Please provide both an email subject and message content.');
+      return;
+    }
+    if (recipientType === 'specific' && !selectedUserId) {
+      setError('Please select a recipient user.');
+      return;
+    }
+
+    setSending(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      const payload = {
+        recipientUserId: recipientType === 'all' ? 'all' : selectedUserId,
+        subject: subject.trim(),
+        message: message.trim(),
+        template,
+      };
+
+      const res = await apiRequest('/api/admin/emails/send', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+
+      setNotice(`Email successfully dispatched to ${res.sentCount} recipient(s).`);
+      setSubject('');
+      setMessage('');
+      setShowPreview(false);
+      loadData();
+    } catch (err: any) {
+      setError(err.message || 'Failed to dispatch email.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleResend = async (id: string) => {
+    try {
+      await apiRequest(`/api/admin/emails/${id}/resend`, { method: 'POST' });
+      setNotice('Email re-dispatched successfully.');
+      loadData();
+    } catch (err: any) {
+      setError(err.message || 'Failed to resend email.');
+    }
+  };
+
+  const applySubjectPreset = (preset: string) => {
+    setSubject(preset);
+  };
+
+  const insertVariable = (variable: string) => {
+    setMessage((prev) => prev + ` ${variable} `);
+  };
+
+  const filteredEmails = emails.filter((em) => {
+    const q = searchFilter.toLowerCase();
+    return (
+      (em.subject || '').toLowerCase().includes(q) ||
+      (em.recipientEmail || '').toLowerCase().includes(q) ||
+      (em.recipientName || '').toLowerCase().includes(q)
+    );
+  });
+
+  if (loading && emails.length === 0) {
+    return <div className="p-12 text-center text-xs text-slate-400">Loading Email Broadcast Center...</div>;
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-800">
+        <div>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2.5">
+            <Mail className="w-6 h-6 text-purple-400" />
+            User Communication & Email Broadcasting
+          </h1>
+          <p className="text-xs text-slate-400 mt-1">
+            Dispatch announcements, system maintenance warnings, and direct notices to registered users
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Link
+            to="/admin/settings"
+            className="px-3.5 py-2 text-xs font-medium rounded-lg border border-slate-800 bg-slate-900 text-slate-300 hover:text-white flex items-center gap-1.5"
+          >
+            Configure SMTP Gateway
+          </Link>
+        </div>
+      </div>
+
+      {notice && (
+        <div className="p-3.5 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-xs text-emerald-200 flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{notice}</span>
+        </div>
+      )}
+
+      {error && (
+        <div className="p-3.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-xs text-rose-200 flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* Compose Email Card */}
+      <div className="p-6 rounded-2xl border border-slate-800 bg-slate-900/60 space-y-6 shadow-xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
+          <div>
+            <h2 className="text-base font-semibold text-white flex items-center gap-2">
+              <Send className="w-4 h-4 text-cyan-400" />
+              Compose & Dispatch Email
+            </h2>
+            <p className="text-xs text-slate-400">
+              Target all registered platform users or send a dedicated direct message
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowPreview(!showPreview)}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-700 bg-slate-800/80 text-cyan-400 hover:bg-slate-800 flex items-center gap-1.5 self-start"
+          >
+            <Eye className="w-3.5 h-3.5" />
+            {showPreview ? 'Hide Preview' : 'Show Live Email Preview'}
+          </button>
+        </div>
+
+        <form onSubmit={handleSendEmail} className="space-y-5">
+          {/* Recipient Selection */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-2">Recipient Audience</label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setRecipientType('all')}
+                className={`p-3.5 rounded-xl border text-left flex items-start gap-3 transition-all ${
+                  recipientType === 'all'
+                    ? 'border-cyan-500 bg-cyan-950/30 text-white'
+                    : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <div className={`w-4 h-4 rounded-full border mt-0.5 flex items-center justify-center ${
+                  recipientType === 'all' ? 'border-cyan-400' : 'border-slate-600'
+                }`}>
+                  {recipientType === 'all' && <div className="w-2 h-2 rounded-full bg-cyan-400" />}
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-white">Broadcast to All Users</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    Sends to all {users.filter((u) => !u.suspended).length} registered active platform accounts
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setRecipientType('specific')}
+                className={`p-3.5 rounded-xl border text-left flex items-start gap-3 transition-all ${
+                  recipientType === 'specific'
+                    ? 'border-cyan-500 bg-cyan-950/30 text-white'
+                    : 'border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <div className={`w-4 h-4 rounded-full border mt-0.5 flex items-center justify-center ${
+                  recipientType === 'specific' ? 'border-cyan-400' : 'border-slate-600'
+                }`}>
+                  {recipientType === 'specific' && <div className="w-2 h-2 rounded-full bg-cyan-400" />}
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-white">Specific User</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    Select an individual account by email address or user ID
+                  </div>
+                </div>
+              </button>
+            </div>
+
+            {recipientType === 'specific' && (
+              <div className="mt-3">
+                <label className="block text-xs font-medium text-slate-300 mb-1.5">Select User Account</label>
+                <select
+                  value={selectedUserId}
+                  onChange={(e) => setSelectedUserId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 text-xs font-mono bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-cyan-500"
+                >
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} — {u.email} ({u.role.toUpperCase()})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {/* Template & Category */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1.5">Notification Category</label>
+              <select
+                value={template}
+                onChange={(e) => setTemplate(e.target.value as any)}
+                className="w-full px-3.5 py-2.5 text-xs bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-cyan-500"
+              >
+                <option value="announcement">📢 Announcement / Feature Update</option>
+                <option value="warning">⚠️ Warning / Maintenance Notice</option>
+                <option value="account">👤 Account & Security Notice</option>
+                <option value="custom">✉️ Direct Custom Message</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1.5">Quick Subject Presets</label>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  'Platform Maintenance Notice',
+                  'Welcome to LYRICAL Hosting',
+                  'WhatsApp Multi-Device Updates',
+                  'Container Allocation Notice',
+                ].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => applySubjectPreset(preset)}
+                    className="px-2 py-1 text-[10px] rounded-lg border border-slate-800 bg-slate-950 text-slate-300 hover:text-cyan-400 hover:border-cyan-500/40"
+                  >
+                    + {preset}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Subject Input */}
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">Email Subject</label>
+            <input
+              type="text"
+              required
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              placeholder="e.g. Scheduled Infrastructure Maintenance Window"
+              className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+
+          {/* Message Content */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-medium text-slate-300">Message Body</label>
+              <div className="flex items-center gap-1 text-[11px] text-slate-400">
+                <span>Insert variable:</span>
+                <button
+                  type="button"
+                  onClick={() => insertVariable('{userName}')}
+                  className="px-1.5 py-0.5 rounded bg-slate-800 text-cyan-400 hover:bg-slate-700"
+                >
+                  &#123;userName&#125;
+                </button>
+                <button
+                  type="button"
+                  onClick={() => insertVariable('{email}')}
+                  className="px-1.5 py-0.5 rounded bg-slate-800 text-cyan-400 hover:bg-slate-700"
+                >
+                  &#123;email&#125;
+                </button>
+              </div>
+            </div>
+            <textarea
+              required
+              rows={6}
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Write your email announcement or user message here..."
+              className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-sans leading-relaxed"
+            />
+          </div>
+
+          {/* Live Email Preview Box */}
+          {showPreview && (
+            <div className="p-5 rounded-xl border border-cyan-500/40 bg-slate-950 space-y-3">
+              <div className="text-[11px] font-mono text-cyan-400 uppercase tracking-wider">
+                Live HTML Preview for Recipient
+              </div>
+              <div className="p-4 rounded-lg bg-[#0f172a] border border-slate-800 text-slate-200 text-xs space-y-3 font-sans">
+                <div className="pb-3 border-b border-slate-800 flex items-center justify-between">
+                  <span className="font-bold text-cyan-400 text-sm">LYRICAL Platform Notification</span>
+                  <span className="text-[10px] text-slate-500 font-mono">{new Date().toUTCString()}</span>
+                </div>
+                <div className="font-semibold text-white text-sm">{subject || '(No subject specified)'}</div>
+                <div className="text-slate-300">Dear User,</div>
+                <div className="p-3 rounded bg-slate-900/80 border-l-4 border-cyan-400 whitespace-pre-wrap leading-relaxed">
+                  {message || 'Your email message content will appear formatted here.'}
+                </div>
+                <div className="pt-3 border-t border-slate-800 text-[10px] text-slate-500">
+                  Sent from Administrator · LYRICAL WhatsApp Bot Cloud Infrastructure
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between pt-2">
+            <span className="text-xs text-slate-400">
+              Emails are delivered to user inbox and permanently logged in database
+            </span>
+            <button
+              type="submit"
+              disabled={sending}
+              className="px-6 py-2.5 text-xs font-semibold rounded-xl bg-gradient-to-r from-purple-600 to-cyan-600 text-white hover:from-purple-500 hover:to-cyan-500 transition-all flex items-center gap-2 shadow-lg shadow-purple-500/20 disabled:opacity-50"
+            >
+              {sending ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  Dispatching Email...
+                </>
+              ) : (
+                <>
+                  <Send className="w-3.5 h-3.5" />
+                  Dispatch Email to {recipientType === 'all' ? 'All Users' : 'User'}
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* Outbound Email History & Logs */}
+      <div className="p-6 rounded-2xl border border-slate-800 bg-slate-900/60 space-y-4 shadow-xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-white">Outbound Email Logs & History</h2>
+            <p className="text-xs text-slate-400">
+              Permanent audit trail of all messages and system emails sent to users ({emails.length} total)
+            </p>
+          </div>
+
+          <div className="relative w-full sm:w-64">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchFilter}
+              onChange={(e) => setSearchFilter(e.target.value)}
+              placeholder="Search by subject or recipient..."
+              className="w-full pl-9 pr-3.5 py-1.5 text-xs bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+        </div>
+
+        {filteredEmails.length === 0 ? (
+          <div className="p-8 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
+            No outbound emails recorded yet. Compose an email above to send your first user communication.
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-slate-800">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-950 text-slate-400 border-b border-slate-800">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">Date & Time</th>
+                  <th className="px-4 py-3 font-semibold">Subject</th>
+                  <th className="px-4 py-3 font-semibold">Recipient</th>
+                  <th className="px-4 py-3 font-semibold">Type</th>
+                  <th className="px-4 py-3 font-semibold">Status</th>
+                  <th className="px-4 py-3 font-semibold text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/80 bg-slate-900/40">
+                {filteredEmails.map((em) => (
+                  <tr key={em.id} className="hover:bg-slate-800/40 transition-colors">
+                    <td className="px-4 py-3 font-mono text-[11px] text-slate-400 whitespace-nowrap">
+                      {new Date(em.sentAt).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 font-medium text-white max-w-xs truncate">
+                      {em.subject}
+                    </td>
+                    <td className="px-4 py-3 text-slate-300">
+                      <div className="font-semibold text-white">{em.recipientName || 'User'}</div>
+                      <div className="text-[11px] font-mono text-cyan-400">{em.recipientEmail}</div>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                        em.template === 'warning'
+                          ? 'bg-amber-950/60 border border-amber-500/40 text-amber-300'
+                          : em.template === 'account'
+                          ? 'bg-purple-950/60 border border-purple-500/40 text-purple-300'
+                          : 'bg-cyan-950/60 border border-cyan-500/40 text-cyan-300'
+                      }`}>
+                        {em.template?.toUpperCase() || 'ANNOUNCEMENT'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-950/60 border border-emerald-800/60 text-emerald-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        {em.status === 'delivered' ? 'DELIVERED' : 'SENT'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => setActiveModalEmail(em)}
+                        className="px-2.5 py-1 text-[11px] font-medium rounded border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800"
+                      >
+                        View
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleResend(em.id)}
+                        className="px-2.5 py-1 text-[11px] font-medium rounded border border-purple-500/40 text-purple-300 hover:bg-purple-900/40"
+                      >
+                        Resend
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Message Modal Preview */}
+      {activeModalEmail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Mail className="w-4 h-4 text-purple-400" />
+                Email Record Details
+              </h3>
+              <button
+                type="button"
+                onClick={() => setActiveModalEmail(null)}
+                className="text-slate-400 hover:text-white text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-2 text-slate-300">
+                <div>
+                  <span className="text-slate-500 block">Recipient:</span>
+                  <span className="font-semibold text-white">{activeModalEmail.recipientName}</span> (
+                  <span className="font-mono text-cyan-400">{activeModalEmail.recipientEmail}</span>)
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Sent At:</span>
+                  <span className="font-mono text-slate-300">
+                    {new Date(activeModalEmail.sentAt).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <span className="text-slate-500 block mb-1">Subject:</span>
+                <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 font-semibold text-white">
+                  {activeModalEmail.subject}
+                </div>
+              </div>
+
+              <div>
+                <span className="text-slate-500 block mb-1">Message Content:</span>
+                <div className="p-3.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-200 whitespace-pre-wrap leading-relaxed max-h-60 overflow-y-auto">
+                  {activeModalEmail.message}
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setActiveModalEmail(null)}
+                className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-800 text-white hover:bg-slate-700"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 };

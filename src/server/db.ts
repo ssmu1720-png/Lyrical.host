@@ -103,12 +103,27 @@ export interface AdminActionRecord {
   adminId: string;
   adminEmail: string;
   action: string;
-  targetType: 'user' | 'bot' | 'server' | 'settings' | 'auth' | 'deployment';
+  targetType: 'user' | 'bot' | 'server' | 'settings' | 'auth' | 'deployment' | 'email';
   targetId: string;
   details: string;
   ip: string;
   userAgent: string;
   timestamp: string;
+}
+
+export interface EmailRecord {
+  id: string;
+  senderAdminId: string;
+  senderEmail: string;
+  recipientUserId: string; // 'all' or specific user id
+  recipientEmail: string;
+  recipientName: string;
+  subject: string;
+  message: string;
+  template: 'announcement' | 'warning' | 'account' | 'custom';
+  status: 'sent' | 'delivered' | 'queued' | 'failed';
+  error?: string | null;
+  sentAt: string;
 }
 
 export interface SystemSettingsRecord {
@@ -125,6 +140,11 @@ export interface SystemSettingsRecord {
   supportEmail: string;
   supportDocsUrl: string;
   deploymentApiUrl: string;
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpUser?: string;
+  smtpPass?: string;
+  smtpFrom?: string;
 }
 
 export interface DatabaseSchema {
@@ -137,6 +157,7 @@ export interface DatabaseSchema {
   notifications: NotificationRecord[];
   adminActions: AdminActionRecord[];
   systemSettings: SystemSettingsRecord;
+  emails: EmailRecord[];
 }
 
 export function hashPassword(password: string, salt?: string): { hash: string; salt: string } {
@@ -199,6 +220,7 @@ function getInitialDatabase(): DatabaseSchema {
     ],
     notifications: [],
     adminActions: [],
+    emails: [],
     systemSettings: {
       platformName: 'LYRICAL',
       logoText: 'LYRICAL',
@@ -234,6 +256,9 @@ class DatabaseManager {
         if (!this.data.servers || this.data.servers.length === 0) {
           this.data.servers = init.servers;
         }
+        if (!this.data.emails) {
+          this.data.emails = [];
+        }
       } catch {
         this.data = getInitialDatabase();
         this.save();
@@ -256,6 +281,15 @@ class DatabaseManager {
     } catch (err) {
       console.error('Failed to persist database:', err);
     }
+  }
+
+  public addEmailRecord(email: EmailRecord): EmailRecord {
+    this.data.emails.unshift(email);
+    if (this.data.emails.length > 500) {
+      this.data.emails = this.data.emails.slice(0, 500);
+    }
+    this.save();
+    return email;
   }
 
   public addNotification(userId: string, type: NotificationRecord['type'], title: string, message: string): NotificationRecord {

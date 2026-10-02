@@ -16,6 +16,7 @@ import {
   Server,
   FileText,
   Activity,
+  Mail,
 } from 'lucide-react';
 import { User } from '../lib/api';
 
@@ -55,6 +56,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const adminNavItems = [
     { path: '/admin', label: 'Overview', icon: LayoutDashboard },
     { path: '/admin/users', label: 'Users', icon: Users },
+    { path: '/admin/emails', label: 'Email Users', icon: Mail },
     { path: '/admin/bots', label: 'All Bots', icon: BotIcon },
     { path: '/admin/deployments', label: 'Deployments', icon: Rocket },
     { path: '/admin/servers', label: 'Servers', icon: Server },

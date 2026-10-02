@@ -1,0 +1,228 @@
+{
+  "users": [
+    {
+      "id": "usr_admin_root",
+      "email": "ssmu1720@gmail.com",
+      "name": "System Administrator",
+      "passwordHash": "867b85ac7226f2c60786ca13e0ebc207e463bee9de7cd48393098ee20fb8e898b8a35f3d713236d0904109405d6a36a27c0bfddb7aabbf88dbc5c831bc236f22",
+      "salt": "c444bafe0f4ea87afcb665790abf9c2c",
+      "role": "admin",
+      "suspended": false,
+      "emailVerified": true,
+      "createdAt": "2026-10-02T19:10:07.940Z",
+      "lastLoginAt": "2026-10-02T19:24:51.489Z"
+    },
+    {
+      "id": "usr_admin_fallback",
+      "email": "admin@lyrical.cloud",
+      "name": "LYRICAL Root Admin",
+      "passwordHash": "867b85ac7226f2c60786ca13e0ebc207e463bee9de7cd48393098ee20fb8e898b8a35f3d713236d0904109405d6a36a27c0bfddb7aabbf88dbc5c831bc236f22",
+      "salt": "c444bafe0f4ea87afcb665790abf9c2c",
+      "role": "admin",
+      "suspended": false,
+      "emailVerified": true,
+      "createdAt": "2026-10-02T19:10:07.940Z",
+      "lastLoginAt": null
+    },
+    {
+      "id": "usr_548c5fb0382a6476",
+      "email": "testuser@example.com",
+      "name": "Test User",
+      "passwordHash": "a3ee8ccdd5cf22a06845d98009fcdd35b0ba69ef3648ae23e371fb02c4a009fc324a8043eb5bbda6fea3d8dd2c9b2d645ddbf95883851b85fd1f491aa365f839",
+      "salt": "2d2549ee555d979eee3446dc8faf0d3e",
+      "role": "user",
+      "suspended": false,
+      "emailVerified": true,
+      "createdAt": "2026-10-02T19:24:32.961Z",
+      "lastLoginAt": "2026-10-02T19:24:42.396Z"
+    }
+  ],
+  "sessions": [
+    {
+      "id": "ses_999910a33771c304",
+      "userId": "usr_admin_root",
+      "token": "lyr_tok_5c4443d206fffa5e89293850de77423a4056eb20dda495c5a2dab919",
+      "ip": "102.204.169.23",
+      "userAgent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Mobile Safari/537.36",
+      "createdAt": "2026-10-02T19:22:17.880Z",
+      "expiresAt": "2026-10-09T19:22:17.880Z"
+    },
+    {
+      "id": "ses_04a7cffcaca2479e",
+      "userId": "usr_548c5fb0382a6476",
+      "token": "lyr_tok_42d68336ef235f67dac09bfdc1907f588677f6c765d74777181878bc",
+      "ip": "127.0.0.1",
+      "userAgent": "curl/7.88.1",
+      "createdAt": "2026-10-02T19:24:32.961Z",
+      "expiresAt": "2026-10-09T19:24:32.961Z"
+    },
+    {
+      "id": "ses_2b5bfc83f5f6f5a6",
+      "userId": "usr_548c5fb0382a6476",
+      "token": "lyr_tok_731809a7bcc65be87b0a106d0fd35a621b2016debbcd273092e2da7a",
+      "ip": "127.0.0.1",
+      "userAgent": "curl/7.88.1",
+      "createdAt": "2026-10-02T19:24:42.396Z",
+      "expiresAt": "2026-10-09T19:24:42.396Z"
+    },
+    {
+      "id": "ses_977f1e1a4750890d",
+      "userId": "usr_admin_root",
+      "token": "lyr_tok_977269373ac31916ea071f3385d487abd29c3ba19b070e1439675f90",
+      "ip": "127.0.0.1",
+      "userAgent": "curl/7.88.1",
+      "createdAt": "2026-10-02T19:24:51.489Z",
+      "expiresAt": "2026-10-09T19:24:51.489Z"
+    }
+  ],
+  "bots": [],
+  "envVars": [],
+  "deployments": [],
+  "servers": [
+    {
+      "id": "srv_local_primary",
+      "name": "LYRICAL-CORE-01 (Primary Runtime)",
+      "region": "eu-west-2 (London)",
+      "host": "127.0.0.1 (Local Host Node)",
+      "status": "online",
+      "capacityBots": 25,
+      "maintenanceMode": false,
+      "createdAt": "2026-10-02T19:10:07.940Z"
+    }
+  ],
+  "notifications": [
+    {
+      "id": "ntf_96eb23569306",
+      "userId": "usr_548c5fb0382a6476",
+      "type": "announcement",
+      "title": "Welcome to the New LYRICAL Authentication System",
+      "message": "We have upgraded our platform with pure database email & password accounts. You can now log in securely without external popups!",
+      "read": false,
+      "createdAt": "2026-10-02T19:24:56.761Z"
+    },
+    {
+      "id": "ntf_a8bc3d647e68",
+      "userId": "usr_admin_fallback",
+      "type": "announcement",
+      "title": "Welcome to the New LYRICAL Authentication System",
+      "message": "We have upgraded our platform with pure database email & password accounts. You can now log in securely without external popups!",
+      "read": false,
+      "createdAt": "2026-10-02T19:24:56.761Z"
+    },
+    {
+      "id": "ntf_ea70bcc2cd79",
+      "userId": "usr_admin_root",
+      "type": "announcement",
+      "title": "Welcome to the New LYRICAL Authentication System",
+      "message": "We have upgraded our platform with pure database email & password accounts. You can now log in securely without external popups!",
+      "read": false,
+      "createdAt": "2026-10-02T19:24:56.760Z"
+    },
+    {
+      "id": "ntf_883c21c50dd9",
+      "userId": "usr_548c5fb0382a6476",
+      "type": "announcement",
+      "title": "Welcome to LYRICAL",
+      "message": "Your WhatsApp bot hosting workspace is ready. Click Deploy Bot to launch your first instance.",
+      "read": false,
+      "createdAt": "2026-10-02T19:24:32.962Z"
+    }
+  ],
+  "adminActions": [
+    {
+      "id": "aud_32728b2a725e",
+      "adminId": "usr_admin_root",
+      "adminEmail": "ssmu1720@gmail.com",
+      "action": "SEND_EMAIL",
+      "targetType": "email",
+      "targetId": "all",
+      "details": "Dispatched email \"Welcome to the New LYRICAL Authentication System\" to 3 user(s)",
+      "ip": "127.0.0.1",
+      "userAgent": "curl/7.88.1",
+      "timestamp": "2026-10-02T19:24:56.762Z"
+    },
+    {
+      "id": "aud_2a571ddd2570",
+      "adminId": "usr_admin_root",
+      "adminEmail": "ssmu1720@gmail.com",
+      "action": "ADMIN_LOGIN",
+      "targetType": "auth",
+      "targetId": "usr_admin_root",
+      "details": "Administrator logged in via password",
+      "ip": "127.0.0.1",
+      "userAgent": "curl/7.88.1",
+      "timestamp": "2026-10-02T19:24:51.489Z"
+    },
+    {
+      "id": "aud_1681be07914c",
+      "adminId": "usr_admin_root",
+      "adminEmail": "ssmu1720@gmail.com",
+      "action": "ADMIN_PORTAL_LOGIN",
+      "targetType": "auth",
+      "targetId": "usr_admin_root",
+      "details": "Administrator authenticated via /admin/login",
+      "ip": "102.204.169.23",
+      "userAgent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Mobile Safari/537.36",
+      "timestamp": "2026-10-02T19:22:17.880Z"
+    }
+  ],
+  "systemSettings": {
+    "platformName": "LYRICAL",
+    "logoText": "LYRICAL",
+    "defaultTheme": "dark",
+    "registrationEnabled": true,
+    "maintenanceMode": false,
+    "maintenanceMessage": "LYRICAL is currently undergoing scheduled infrastructure upgrades. Active WhatsApp bot containers remain online.",
+    "maintenanceReturnTime": "2026-10-02T21:10:07.940Z",
+    "maxBotsPerUser": 10,
+    "maxConcurrentDeployments": 5,
+    "announcementBanner": "",
+    "supportEmail": "support@lyrical.cloud",
+    "supportDocsUrl": "https://baileys.whiskeysockets.io",
+    "deploymentApiUrl": ""
+  },
+  "emails": [
+    {
+      "id": "eml_6f394b549542",
+      "senderAdminId": "usr_admin_root",
+      "senderEmail": "ssmu1720@gmail.com",
+      "recipientUserId": "usr_548c5fb0382a6476",
+      "recipientEmail": "testuser@example.com",
+      "recipientName": "Test User",
+      "subject": "Welcome to the New LYRICAL Authentication System",
+      "message": "We have upgraded our platform with pure database email & password accounts. You can now log in securely without external popups!",
+      "template": "announcement",
+      "status": "sent",
+      "error": null,
+      "sentAt": "2026-10-02T19:24:56.760Z"
+    },
+    {
+      "id": "eml_784696517ffd",
+      "senderAdminId": "usr_admin_root",
+      "senderEmail": "ssmu1720@gmail.com",
+      "recipientUserId": "usr_admin_fallback",
+      "recipientEmail": "admin@lyrical.cloud",
+      "recipientName": "LYRICAL Root Admin",
+      "subject": "Welcome to the New LYRICAL Authentication System",
+      "message": "We have upgraded our platform with pure database email & password accounts. You can now log in securely without external popups!",
+      "template": "announcement",
+      "status": "sent",
+      "error": null,
+      "sentAt": "2026-10-02T19:24:56.760Z"
+    },
+    {
+      "id": "eml_bf5dba4fd1a1",
+      "senderAdminId": "usr_admin_root",
+      "senderEmail": "ssmu1720@gmail.com",
+      "recipientUserId": "usr_admin_root",
+      "recipientEmail": "ssmu1720@gmail.com",
+      "recipientName": "System Administrator",
+      "subject": "Welcome to the New LYRICAL Authentication System",
+      "message": "We have upgraded our platform with pure database email & password accounts. You can now log in securely without external popups!",
+      "template": "announcement",
+      "status": "sent",
+      "error": null,
+      "sentAt": "2026-10-02T19:24:56.760Z"
+    }
+  ]
+}
