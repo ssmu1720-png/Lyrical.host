@@ -51,6 +51,8 @@ export interface BotRecord {
   pid: number | null;
   startedAt: string | null;
   lastRestartAt: string | null;
+  autoRestart?: boolean;
+  restartCount?: number;
   createdAt: string;
   updatedAt: string;
 }

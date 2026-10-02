@@ -1,6 +1,8 @@
 import express, { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import path from 'path';
+import http from 'http';
+import https from 'https';
 import { createServer as createViteServer } from 'vite';
 import { db, hashPassword, verifyPassword, UserRecord, BotRecord, DeploymentRecord } from './src/server/db.ts';
 import { processManager } from './src/server/processManager.ts';
@@ -515,6 +517,7 @@ async function startServer() {
       const server = db.state.servers[0];
       const now = new Date().toISOString();
       const defaultStart = runtime === 'python' ? 'python3 main.py' : 'node index.js';
+      const allocatedPort = await processManager.allocateAvailablePort(Number(port) || 8080, botId);
 
       const newBot: BotRecord = {
         id: botId,
@@ -526,7 +529,7 @@ async function startServer() {
         branch: String(branch || 'main').trim(),
         startCommand: String(startCommand || defaultStart).trim(),
         buildCommand: String(buildCommand || '').trim(),
-        port: Number(port) || 8080,
+        port: allocatedPort,
         region: String(region || server.region),
         serverId: server.id,
         containerId: `lyr_cnt_${botId.replace('bot_', '')}`,
@@ -539,6 +542,8 @@ async function startServer() {
         pid: null,
         startedAt: null,
         lastRestartAt: null,
+        autoRestart: req.body.autoRestart !== undefined ? Boolean(req.body.autoRestart) : true,
+        restartCount: 0,
         createdAt: now,
         updatedAt: now,
       };
@@ -706,7 +711,7 @@ async function startServer() {
     if (!bot || !canAccessBot(req.user!, bot)) {
       return res.status(404).json({ error: 'Bot not found.' });
     }
-    const { name, description, repoUrl, branch, startCommand, buildCommand, port, whatsappAuthMethod, whatsappPhone } = req.body;
+    const { name, description, repoUrl, branch, startCommand, buildCommand, port, whatsappAuthMethod, whatsappPhone, autoRestart } = req.body;
     if (name !== undefined && String(name).trim()) bot.name = String(name).trim().slice(0, 64);
     if (description !== undefined) bot.description = String(description).trim().slice(0, 240);
     if (repoUrl !== undefined) bot.repoUrl = String(repoUrl).trim();
@@ -716,6 +721,7 @@ async function startServer() {
     if (port !== undefined) bot.port = Number(port) || 8080;
     if (whatsappAuthMethod !== undefined) bot.whatsappAuthMethod = whatsappAuthMethod === 'qr_code' ? 'qr_code' : 'pairing_code';
     if (whatsappPhone !== undefined) bot.whatsappPhone = String(whatsappPhone).trim();
+    if (autoRestart !== undefined) bot.autoRestart = Boolean(autoRestart);
     bot.updatedAt = new Date().toISOString();
     db.save();
     res.json({ bot: { ...bot, telemetry: processManager.getBotLiveTelemetry(bot) } });
@@ -1200,6 +1206,18 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  // Anti-sleep pinger: keeps the cloud container awake on Railway / Render / Cloud Run
+  const keepAliveUrl = process.env.RAILWAY_STATIC_URL
+    ? `https://${process.env.RAILWAY_STATIC_URL}/api/health`
+    : process.env.PUBLIC_APP_URL || process.env.RENDER_EXTERNAL_URL;
+
+  setInterval(() => {
+    http.get(`http://127.0.0.1:${PORT}/api/health`, () => {}).on('error', () => {});
+    if (keepAliveUrl && keepAliveUrl.startsWith('https://')) {
+      https.get(keepAliveUrl, () => {}).on('error', () => {});
+    }
+  }, 4 * 60 * 1000); // Heartbeat every 4 minutes
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[LYRICAL] Full-stack platform server listening on http://0.0.0.0:${PORT}`);

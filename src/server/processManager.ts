@@ -2,6 +2,7 @@ import { spawn, ChildProcess, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import net from 'net';
 import { EventEmitter } from 'events';
 import { db, BotRecord, DeploymentRecord } from './db.ts';
 
@@ -20,6 +21,8 @@ interface RunningBotProcess {
 class RealProcessManager {
   private processes: Map<string, RunningBotProcess> = new Map();
   private logArchive: Map<string, string[]> = new Map();
+  private watchdogInterval: NodeJS.Timeout | null = null;
+  private restartBackoffs: Map<string, { count: number; lastAttempt: number }> = new Map();
 
   constructor() {
     if (!fs.existsSync(WORKSPACES_DIR)) {
@@ -43,6 +46,79 @@ class RealProcessManager {
       }
     }
     db.save();
+    this.startWatchdog();
+  }
+
+  /**
+   * Continuous 24/7 Watchdog that inspects all bots and recovers any that slept or terminated silently
+   */
+  public startWatchdog(): void {
+    if (this.watchdogInterval) return;
+    this.watchdogInterval = setInterval(() => {
+      this.runWatchdogCycle().catch((err) => {
+        console.error('[WATCHDOG-CYCLE-ERR]', err);
+      });
+    }, 15000); // Probe every 15 seconds
+  }
+
+  public async runWatchdogCycle(): Promise<void> {
+    const now = Date.now();
+    for (const bot of db.state.bots) {
+      if (bot.status !== 'running') continue;
+      if (bot.autoRestart === false) continue;
+
+      const proc = this.processes.get(bot.id);
+      let isDead = false;
+
+      if (!proc || !proc.pid) {
+        isDead = true;
+      } else {
+        try {
+          // Signal 0 probes process existence in the OS kernel
+          process.kill(proc.pid, 0);
+        } catch (e: any) {
+          if (e.code === 'ESRCH') {
+            isDead = true;
+          }
+        }
+      }
+
+      if (isDead) {
+        const backoff = this.restartBackoffs.get(bot.id) || { count: 0, lastAttempt: 0 };
+        // Reset counter if more than 5 minutes have elapsed since last attempt
+        if (now - backoff.lastAttempt > 5 * 60 * 1000) {
+          backoff.count = 0;
+        }
+
+        if (backoff.count >= 8) {
+          this.appendLog(
+            bot.id,
+            `[WATCHDOG] Bot ${bot.name} reached max recovery attempts (8). Pausing auto-restart to prevent crash loop.`
+          );
+          bot.status = 'failed';
+          bot.whatsappState = 'DISCONNECTED';
+          db.save();
+          continue;
+        }
+
+        backoff.count++;
+        backoff.lastAttempt = now;
+        this.restartBackoffs.set(bot.id, backoff);
+
+        bot.restartCount = (bot.restartCount || 0) + 1;
+        bot.lastRestartAt = new Date().toISOString();
+        this.appendLog(
+          bot.id,
+          `[WATCHDOG] Detected bot "${bot.name}" is sleeping or process stopped (Recovery attempt ${backoff.count}/8). Automatically restarting...`
+        );
+        this.processes.delete(bot.id);
+        db.save();
+
+        this.startBot(bot).catch((err) => {
+          this.appendLog(bot.id, `[WATCHDOG-ERR] Auto-recovery restart failed: ${err.message}`);
+        });
+      }
+    }
   }
 
   public getBotDir(botId: string): string {
@@ -327,6 +403,100 @@ class RealProcessManager {
     });
   }
 
+  /**
+   * Probes whether a TCP port is currently occupied on IPv6 (::) or IPv4 (0.0.0.0)
+   */
+  public checkPortOccupiedOnHost(port: number): Promise<boolean> {
+    const probeHost = (host: string): Promise<boolean> =>
+      new Promise((resolve) => {
+        const tester = net.createServer();
+        tester.once('error', (err: any) => {
+          if (err.code === 'EADDRINUSE' || err.code === 'EACCES') {
+            resolve(true);
+          } else {
+            resolve(false);
+          }
+        });
+        tester.once('listening', () => {
+          tester.close(() => resolve(false));
+        });
+        try {
+          tester.listen(port, host);
+        } catch {
+          resolve(true);
+        }
+      });
+
+    return (async () => {
+      const ipv6Busy = await probeHost('::');
+      if (ipv6Busy) return true;
+      const ipv4Busy = await probeHost('0.0.0.0');
+      return ipv4Busy;
+    })();
+  }
+
+  /**
+   * Detects if the requested port (e.g. 8080) is occupied and scans 4100-4999 for the next available port
+   */
+  public async allocateAvailablePort(
+    preferredPort: number,
+    botId: string,
+    deploymentId?: string
+  ): Promise<number> {
+    const targetPort = Number(preferredPort) || 8080;
+
+    // Check if another active bot already claims this port
+    const claimedByOtherBot = (p: number) =>
+      db.state.bots.some((b) => b.id !== botId && b.status === 'running' && b.port === p);
+
+    const isTargetBusy =
+      targetPort === 3000 ||
+      targetPort === 8080 ||
+      claimedByOtherBot(targetPort) ||
+      (await this.checkPortOccupiedOnHost(targetPort));
+
+    if (!isTargetBusy) {
+      return targetPort;
+    }
+
+    this.appendLog(
+      botId,
+      `[PORT-SCANNER] Detected port ${targetPort} is occupied on host. Scanning range 4100–4999 for next available port...`,
+      deploymentId
+    );
+
+    for (let candidate = 4100; candidate <= 4999; candidate++) {
+      if (claimedByOtherBot(candidate)) continue;
+      const busy = await this.checkPortOccupiedOnHost(candidate);
+      if (!busy) {
+        this.appendLog(
+          botId,
+          `[PORT-SCANNER] Dynamically assigned available port ${candidate} (avoided EADDRINUSE on ${targetPort}).`,
+          deploymentId
+        );
+        return candidate;
+      }
+    }
+
+    // Fallback: ask OS kernel for an ephemeral free port
+    const ephemeralPort = await new Promise<number>((resolve) => {
+      const srv = net.createServer();
+      srv.listen(0, '0.0.0.0', () => {
+        const addr = srv.address();
+        const assigned = typeof addr === 'object' && addr ? addr.port : 4500;
+        srv.close(() => resolve(assigned));
+      });
+      srv.on('error', () => resolve(4500));
+    });
+
+    this.appendLog(
+      botId,
+      `[PORT-SCANNER] Dynamically assigned OS ephemeral port ${ephemeralPort}.`,
+      deploymentId
+    );
+    return ephemeralPort;
+  }
+
   public async startBot(bot: BotRecord, deploymentId?: string): Promise<void> {
     if (this.processes.has(bot.id)) {
       await this.stopBot(bot);
@@ -335,12 +505,21 @@ class RealProcessManager {
     const botDir = this.getBotDir(bot.id);
     this.ensureBotWorkspaceFiles(bot, botDir);
 
+    // Detect if port 8080 (or current bot.port) is occupied and dynamically assign next available port
+    const safePort = await this.allocateAvailablePort(bot.port || 8080, bot.id, deploymentId);
+    bot.port = safePort;
+    db.save();
+
     // Collect environment variables from DB
     const envRecords = db.state.envVars.filter(e => e.botId === bot.id);
     const customEnv: Record<string, string> = {};
     for (const r of envRecords) {
       customEnv[r.key] = r.value;
     }
+    // Ensure PORT in customEnv cannot override our dynamically verified safePort with 8080
+    customEnv['PORT'] = String(safePort);
+    customEnv['SERVER_PORT'] = String(safePort);
+    customEnv['APP_PORT'] = String(safePort);
 
     const startCmd = bot.startCommand || (bot.runtime === 'python' ? 'python3 main.py' : 'node index.js');
     const emitter = new EventEmitter();
@@ -351,14 +530,6 @@ class RealProcessManager {
         ? `${existingNodeOpts} --require "${hookPath}"`.trim()
         : existingNodeOpts;
 
-    // Assign a dedicated non-conflicting port (avoiding 3000 and 8080 which are used by host/proxy)
-    let safePort = Number(bot.port) || 4100;
-    if (safePort === 8080 || safePort === 3000) {
-      const hashNum = bot.id.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-      safePort = 4100 + (hashNum % 800);
-      bot.port = safePort;
-    }
-
     const child = spawn(startCmd, {
       cwd: botDir,
       shell: true,
@@ -368,6 +539,7 @@ class RealProcessManager {
         NODE_OPTIONS: nodeOptions,
         PORT: String(safePort),
         SERVER_PORT: String(safePort),
+        APP_PORT: String(safePort),
         LYRICAL_BOT_PORT: String(safePort),
         BOT_ID: bot.id,
         BOT_NAME: bot.name,
@@ -426,19 +598,43 @@ class RealProcessManager {
       if (currentBot) {
         this.appendLog(bot.id, `[PROCESS] Exited with code=${code} signal=${signal}`);
         if (currentBot.status === 'running') {
-          // Unexpected exit / crash
-          currentBot.status = code === 0 ? 'stopped' : 'failed';
           currentBot.pid = null;
           currentBot.whatsappState = 'DISCONNECTED';
-          if (code !== 0 && signal !== 'SIGTERM' && signal !== 'SIGKILL') {
+
+          // If stopped intentionally via user action (SIGTERM/SIGKILL), mark stopped
+          if (signal === 'SIGTERM' || signal === 'SIGKILL' || currentBot.autoRestart === false) {
+            currentBot.status = 'stopped';
+            db.save();
+          } else {
+            // Unexpected crash or silent sleep exit: notify user and trigger auto-restart watchdog
+            currentBot.status = 'deploying';
+            currentBot.restartCount = (currentBot.restartCount || 0) + 1;
+            currentBot.lastRestartAt = new Date().toISOString();
             db.addNotification(
               currentBot.userId,
               'bot_crashed',
               `Bot Process Exited: ${currentBot.name}`,
-              `Bot ${currentBot.name} exited unexpectedly with code ${code}.`
+              `Bot ${currentBot.name} exited (code ${code}). Auto-restarting watchdog active...`
             );
+            db.save();
+
+            this.appendLog(
+              bot.id,
+              `[WATCHDOG] Process terminated / slept (code ${code}, signal ${signal}). Automatically restarting bot in 4 seconds...`
+            );
+
+            setTimeout(() => {
+              // Only restart if still in deploying state (user hasn't manually deleted/stopped it)
+              const recheck = db.state.bots.find((b) => b.id === bot.id);
+              if (recheck && recheck.status === 'deploying') {
+                this.startBot(recheck).catch((err) => {
+                  this.appendLog(bot.id, `[WATCHDOG-ERR] Auto-restart failed: ${err.message}`);
+                  recheck.status = 'failed';
+                  db.save();
+                });
+              }
+            }, 4000);
           }
-          db.save();
         }
       }
     });

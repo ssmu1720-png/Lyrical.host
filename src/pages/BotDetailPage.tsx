@@ -68,6 +68,7 @@ export const BotDetailPage: React.FC = () => {
   const [editStartCmd, setEditStartCmd] = useState('');
   const [editBuildCmd, setEditBuildCmd] = useState('');
   const [editPort, setEditPort] = useState(8080);
+  const [editAutoRestart, setEditAutoRestart] = useState(true);
 
   // Confirmation dialogs for destructive actions
   const [confirmAction, setConfirmAction] = useState<
@@ -114,6 +115,7 @@ export const BotDetailPage: React.FC = () => {
         setEditStartCmd(res.bot.startCommand || '');
         setEditBuildCmd(res.bot.buildCommand || '');
         setEditPort(res.bot.port || 8080);
+        setEditAutoRestart(res.bot.autoRestart !== false);
 
         const defaultFile = res.bot.runtime === 'python' ? 'main.py' : 'index.js';
         loadWorkspaceFile(defaultFile);
@@ -278,6 +280,7 @@ export const BotDetailPage: React.FC = () => {
           startCommand: editStartCmd,
           buildCommand: editBuildCmd,
           port: editPort,
+          autoRestart: editAutoRestart,
         }),
       });
       await apiRequest(`/api/bots/${id}/env`, {
@@ -336,6 +339,12 @@ export const BotDetailPage: React.FC = () => {
             >
               {bot.status === 'running' ? 'ONLINE' : bot.status.toUpperCase()}
             </span>
+            {bot.autoRestart !== false && (
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-950/60 border border-emerald-800/60 text-emerald-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Watchdog Active {bot.restartCount && bot.restartCount > 0 ? `(${bot.restartCount} recoveries)` : ''}
+              </span>
+            )}
           </div>
         </div>
 
@@ -868,6 +877,27 @@ export const BotDetailPage: React.FC = () => {
                   className="w-full px-3.5 py-2 text-xs font-mono bg-slate-950 border border-slate-800 rounded-lg text-white"
                 />
               </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-semibold text-white flex items-center gap-2">
+                  <RotateCw className="w-3.5 h-3.5 text-cyan-400" />
+                  Auto-Restart & Anti-Sleep Watchdog (24/7 Monitoring)
+                </span>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Continuously monitors bot process liveness every 15s. Automatically recovers and restarts the bot if it sleeps, crashes, or disconnects.
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer ml-4">
+                <input
+                  type="checkbox"
+                  checked={editAutoRestart}
+                  onChange={(e) => setEditAutoRestart(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-10 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500" />
+              </label>
             </div>
           </div>
 
