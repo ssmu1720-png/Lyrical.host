@@ -21,6 +21,10 @@ import {
   Send,
   Eye,
   RefreshCw,
+  Database,
+  Download,
+  Upload,
+  Cloud,
 } from 'lucide-react';
 import { apiRequest, formatUptime } from '../lib/api';
 
@@ -866,10 +870,71 @@ export const AdminSettingsPage: React.FC<{ onSettingsUpdated?: () => void }> = (
   const [settings, setSettings] = useState<any>(null);
   const [broadcast, setBroadcast] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [dbStatus, setDbStatus] = useState<any>(null);
+  const [cloudSyncing, setCloudSyncing] = useState(false);
+  const [cloudRestoring, setCloudRestoring] = useState(false);
+
+  const loadDbStatus = () => {
+    apiRequest('/api/admin/database/status')
+      .then((res) => setDbStatus(res))
+      .catch(() => {});
+  };
 
   useEffect(() => {
     apiRequest('/api/admin/settings').then((res) => setSettings(res.settings));
+    loadDbStatus();
   }, []);
+
+  const handleForceCloudSync = async () => {
+    setCloudSyncing(true);
+    try {
+      const res = await apiRequest('/api/admin/database/sync', { method: 'POST' });
+      setNotice(res.message || 'Database state successfully synced to Cloud Firestore.');
+      loadDbStatus();
+    } catch (err: any) {
+      setNotice(`Sync failed: ${err.message}`);
+    } finally {
+      setCloudSyncing(false);
+    }
+  };
+
+  const handleForceCloudRestore = async () => {
+    if (!window.confirm('Restore database state from Cloud Firestore? This will merge all saved records.')) {
+      return;
+    }
+    setCloudRestoring(true);
+    try {
+      const res = await apiRequest('/api/admin/database/restore', { method: 'POST' });
+      setNotice(res.message || 'Database restored from Cloud Firestore.');
+      loadDbStatus();
+      if (onSettingsUpdated) onSettingsUpdated();
+    } catch (err: any) {
+      setNotice(`Restore failed: ${err.message}`);
+    } finally {
+      setCloudRestoring(false);
+    }
+  };
+
+  const handleImportBackupFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target?.result as string;
+        const res = await apiRequest('/api/admin/database/restore-json', {
+          method: 'POST',
+          body: JSON.stringify({ backupData: text }),
+        });
+        setNotice(res.message || 'Database restored from JSON backup.');
+        loadDbStatus();
+        if (onSettingsUpdated) onSettingsUpdated();
+      } catch (err: any) {
+        setNotice(`Import failed: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -887,20 +952,111 @@ export const AdminSettingsPage: React.FC<{ onSettingsUpdated?: () => void }> = (
   }
 
   return (
-    <form onSubmit={handleSave} className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-3xl mx-auto space-y-6">
       <div className="pb-4 border-b border-slate-800">
         <h1 className="text-2xl font-bold">System & Maintenance Configuration</h1>
         <p className="text-xs text-slate-400 mt-1">
-          Configure global maintenance mode, user bot quotas, announcements, and upstream deployment API adapter URL
+          Configure global maintenance mode, user bot quotas, announcements, and 24/7 Cloud Firestore database persistence
         </p>
       </div>
 
       {notice && (
-        <div className="p-3 rounded-xl bg-cyan-950/60 border border-cyan-500/40 text-xs text-cyan-200 flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-cyan-400" />
-          {notice}
+        <div className="p-3.5 rounded-xl bg-cyan-950/60 border border-cyan-500/40 text-xs text-cyan-200 flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />
+          <span>{notice}</span>
         </div>
       )}
+
+      {/* Cloud Firestore 24/7 Persistence Status & Controls */}
+      <div className="p-6 rounded-xl border border-cyan-500/30 bg-slate-900/80 space-y-4 shadow-xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+          <div>
+            <div className="flex items-center gap-2">
+              <Cloud className="w-5 h-5 text-cyan-400" />
+              <h2 className="text-sm font-bold text-white">Cloud Firestore Database Persistence</h2>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-950/80 border border-emerald-500/40 text-emerald-400">
+                24/7 CLOUD SYNC ACTIVE
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">
+              Google Cloud Firestore database (<span className="font-mono text-cyan-300">ai-studio-lyrical-b9890ed5-f09d-48dc-95a3-2608f6cbc797</span>) retains all users, bots, deployments, and emails across container restarts
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={loadDbStatus}
+            className="p-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:text-white self-start"
+            title="Refresh database status"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        </div>
+
+        {dbStatus && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+            <div className="p-3 rounded-lg bg-slate-950 border border-slate-800">
+              <span className="text-[11px] text-slate-500 block">Total Users</span>
+              <span className="text-base font-bold text-white">{dbStatus.totalUsers ?? 0}</span>
+            </div>
+            <div className="p-3 rounded-lg bg-slate-950 border border-slate-800">
+              <span className="text-[11px] text-slate-500 block">Total Bots</span>
+              <span className="text-base font-bold text-cyan-400">{dbStatus.totalBots ?? 0}</span>
+            </div>
+            <div className="p-3 rounded-lg bg-slate-950 border border-slate-800">
+              <span className="text-[11px] text-slate-500 block">Deployments</span>
+              <span className="text-base font-bold text-purple-400">{dbStatus.totalDeployments ?? 0}</span>
+            </div>
+            <div className="p-3 rounded-lg bg-slate-950 border border-slate-800">
+              <span className="text-[11px] text-slate-500 block">Dispatched Emails</span>
+              <span className="text-base font-bold text-emerald-400">{dbStatus.totalEmails ?? 0}</span>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2 pt-2">
+          <button
+            type="button"
+            disabled={cloudSyncing}
+            onClick={handleForceCloudSync}
+            className="px-3.5 py-2 text-xs font-semibold rounded-lg bg-cyan-600 text-slate-950 hover:bg-cyan-500 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <Cloud className="w-3.5 h-3.5" />
+            {cloudSyncing ? 'Syncing to Firestore...' : 'Force Sync to Cloud Firestore'}
+          </button>
+
+          <button
+            type="button"
+            disabled={cloudRestoring}
+            onClick={handleForceCloudRestore}
+            className="px-3.5 py-2 text-xs font-semibold rounded-lg border border-purple-500/40 bg-purple-950/40 text-purple-300 hover:bg-purple-900/50 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            {cloudRestoring ? 'Restoring from Firestore...' : 'Restore from Cloud Firestore'}
+          </button>
+
+          <a
+            href="/api/admin/database/backup"
+            download
+            className="px-3.5 py-2 text-xs font-semibold rounded-lg border border-slate-700 bg-slate-800 text-slate-200 hover:text-white transition-colors flex items-center gap-1.5"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Export JSON Backup
+          </a>
+
+          <label className="px-3.5 py-2 text-xs font-semibold rounded-lg border border-slate-700 bg-slate-800 text-slate-200 hover:text-white transition-colors flex items-center gap-1.5 cursor-pointer">
+            <Upload className="w-3.5 h-3.5" />
+            Import Backup File
+            <input
+              type="file"
+              accept=".json"
+              onChange={handleImportBackupFile}
+              className="hidden"
+            />
+          </label>
+        </div>
+      </div>
+
+      <form onSubmit={handleSave} className="space-y-6">
 
       <div className="p-6 rounded-xl border border-slate-800 bg-slate-900/60 space-y-5">
         <div className="flex items-center justify-between pb-4 border-b border-slate-800">

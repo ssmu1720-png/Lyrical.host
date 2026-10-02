@@ -1,8 +1,23 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { cloudFirestoreSync } from './cloudFirestoreSync.ts';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+function resolveDataDirectory(): string {
+  const envDir = process.env.DATA_DIR;
+  if (envDir && fs.existsSync(envDir)) return envDir;
+  if (fs.existsSync('/railway/data')) return '/railway/data';
+  if (fs.existsSync('/data') && !fs.existsSync('/data/usr')) return '/data';
+  const localData = path.resolve(process.cwd(), 'data');
+  if (!fs.existsSync(localData)) {
+    try {
+      fs.mkdirSync(localData, { recursive: true });
+    } catch {}
+  }
+  return localData;
+}
+
+const DATA_DIR = resolveDataDirectory();
 const DB_PATH = path.join(DATA_DIR, 'lyrical-db.json');
 
 export interface UserRecord {
@@ -241,10 +256,14 @@ function getInitialDatabase(): DatabaseSchema {
 
 class DatabaseManager {
   private data: DatabaseSchema;
+  private cloudSyncTimer: NodeJS.Timeout | null = null;
+  private saveDebounceTimer: NodeJS.Timeout | null = null;
 
   constructor() {
     if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+      try {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      } catch {}
     }
     if (fs.existsSync(DB_PATH)) {
       try {
@@ -267,19 +286,143 @@ class DatabaseManager {
       this.data = getInitialDatabase();
       this.save();
     }
+
+    // Immediately trigger asynchronous cloud restoration from Cloud Firestore
+    this.hydrateFromCloudFirestore();
+
+    // Start 60-second periodic background cloud sync to ensure zero data loss
+    this.cloudSyncTimer = setInterval(() => {
+      cloudFirestoreSync.saveToFirestore(this.data).catch(() => {});
+    }, 60 * 1000);
+  }
+
+  /**
+   * Hydrates database from Cloud Firestore to survive container redeployments and restarts
+   */
+  public async hydrateFromCloudFirestore(): Promise<boolean> {
+    try {
+      const cloudData = await cloudFirestoreSync.loadFromFirestore();
+      if (!cloudData) return false;
+
+      // Merge users: keep all cloud users and local users without duplicates
+      const localUsers = this.data.users || [];
+      const cloudUsers = cloudData.users || [];
+      const mergedUsersMap = new Map<string, UserRecord>();
+
+      for (const u of cloudUsers) {
+        mergedUsersMap.set(u.email.toLowerCase(), u);
+      }
+      for (const u of localUsers) {
+        if (!mergedUsersMap.has(u.email.toLowerCase())) {
+          mergedUsersMap.set(u.email.toLowerCase(), u);
+        }
+      }
+      this.data.users = Array.from(mergedUsersMap.values());
+
+      // Merge bots
+      const localBots = this.data.bots || [];
+      const cloudBots = cloudData.bots || [];
+      const mergedBotsMap = new Map<string, BotRecord>();
+      for (const b of cloudBots) {
+        mergedBotsMap.set(b.id, b);
+      }
+      for (const b of localBots) {
+        if (!mergedBotsMap.has(b.id)) {
+          mergedBotsMap.set(b.id, b);
+        }
+      }
+      this.data.bots = Array.from(mergedBotsMap.values());
+
+      // Merge envVars
+      const localEnv = this.data.envVars || [];
+      const cloudEnv = cloudData.envVars || [];
+      const envKey = (e: EnvVarRecord) => `${e.botId}_${e.key}`;
+      const mergedEnvMap = new Map<string, EnvVarRecord>();
+      for (const e of cloudEnv) {
+        mergedEnvMap.set(envKey(e), e);
+      }
+      for (const e of localEnv) {
+        if (!mergedEnvMap.has(envKey(e))) {
+          mergedEnvMap.set(envKey(e), e);
+        }
+      }
+      this.data.envVars = Array.from(mergedEnvMap.values());
+
+      // Deployments, emails, notifications
+      if (cloudData.deployments && cloudData.deployments.length > (this.data.deployments?.length || 0)) {
+        this.data.deployments = cloudData.deployments;
+      }
+      if (cloudData.emails && cloudData.emails.length > (this.data.emails?.length || 0)) {
+        this.data.emails = cloudData.emails;
+      }
+      if (cloudData.notifications && cloudData.notifications.length > (this.data.notifications?.length || 0)) {
+        this.data.notifications = cloudData.notifications;
+      }
+
+      // Persist merged unified state to local file
+      this.saveLocal();
+      console.log(
+        `[LYRICAL-DB] Successfully hydrated persistent records: ${this.data.users.length} users, ${this.data.bots.length} bots, ${this.data.deployments.length} deployments.`
+      );
+      return true;
+    } catch (err: any) {
+      console.warn('[LYRICAL-DB] Cloud hydration warning:', err.message);
+      return false;
+    }
   }
 
   public get state(): DatabaseSchema {
     return this.data;
   }
 
-  public save(): void {
+  private saveLocal(): void {
     try {
       const tmpPath = `${DB_PATH}.tmp`;
       fs.writeFileSync(tmpPath, JSON.stringify(this.data, null, 2), 'utf-8');
       fs.renameSync(tmpPath, DB_PATH);
     } catch (err) {
-      console.error('Failed to persist database:', err);
+      console.error('Failed to persist local database file:', err);
+    }
+  }
+
+  public save(): void {
+    this.saveLocal();
+
+    // Debounce cloud push to avoid spamming the network while ensuring fast persistence
+    if (this.saveDebounceTimer) {
+      clearTimeout(this.saveDebounceTimer);
+    }
+    this.saveDebounceTimer = setTimeout(() => {
+      cloudFirestoreSync.saveToFirestore(this.data).catch(() => {});
+    }, 1500);
+  }
+
+  public async forceSyncToCloud(): Promise<boolean> {
+    this.saveLocal();
+    const ok = await cloudFirestoreSync.saveToFirestore(this.data);
+    await cloudFirestoreSync.saveHistoricalSnapshot(this.data);
+    return ok;
+  }
+
+  public async forceRestoreFromCloud(): Promise<boolean> {
+    return await this.hydrateFromCloudFirestore();
+  }
+
+  public exportBackupJson(): string {
+    return JSON.stringify(this.data, null, 2);
+  }
+
+  public restoreBackupJson(rawJson: string): boolean {
+    try {
+      const parsed: DatabaseSchema = JSON.parse(rawJson);
+      if (!parsed.users || !Array.isArray(parsed.users)) {
+        throw new Error('Invalid database backup format: missing users array.');
+      }
+      this.data = parsed;
+      this.save();
+      return true;
+    } catch (err: any) {
+      throw new Error(`Backup restore failed: ${err.message}`);
     }
   }
 

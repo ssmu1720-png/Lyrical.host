@@ -6,6 +6,7 @@ import https from 'https';
 import nodemailer from 'nodemailer';
 import { createServer as createViteServer } from 'vite';
 import { db, hashPassword, verifyPassword, UserRecord, BotRecord, DeploymentRecord, EmailRecord } from './src/server/db.ts';
+import { cloudFirestoreSync } from './src/server/cloudFirestoreSync.ts';
 import { processManager } from './src/server/processManager.ts';
 import { deploymentService } from './src/server/deploymentService.ts';
 
@@ -1357,6 +1358,79 @@ async function startServer() {
     db.addNotification(existing.recipientUserId, 'announcement', existing.subject, existing.message);
     db.addEmailRecord(newRecord);
     res.json({ ok: true, email: newRecord });
+  });
+
+  // --- ADMIN CLOUD DATABASE PERSISTENCE & BACKUPS ---
+  app.get('/api/admin/database/status', requireAuth, requireAdmin, (_req, res) => {
+    const fsStatus = cloudFirestoreSync.getStatus();
+    res.json({
+      status: 'ok',
+      firestore: fsStatus,
+      totalUsers: db.state.users.length,
+      totalBots: db.state.bots.length,
+      totalDeployments: db.state.deployments.length,
+      totalEmails: db.state.emails.length,
+      totalEnvVars: db.state.envVars.length,
+    });
+  });
+
+  app.post('/api/admin/database/sync', requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      const success = await db.forceSyncToCloud();
+      if (!success) {
+        return res.status(500).json({ error: 'Failed to sync database to Cloud Firestore.' });
+      }
+      res.json({ ok: true, message: 'Database successfully synced and backed up to Cloud Firestore.' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/admin/database/restore', requireAuth, requireAdmin, async (_req, res) => {
+    try {
+      const restored = await db.forceRestoreFromCloud();
+      if (!restored) {
+        return res.status(404).json({ error: 'No previous Cloud Firestore snapshot found to restore.' });
+      }
+      res.json({
+        ok: true,
+        message: `Database successfully restored from Cloud Firestore (${db.state.users.length} users, ${db.state.bots.length} bots).`,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/admin/database/backup', requireAuth, requireAdmin, (_req, res) => {
+    const backupJson = db.exportBackupJson();
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="lyrical-backup-${new Date().toISOString().slice(0, 10)}.json"`
+    );
+    res.send(backupJson);
+  });
+
+  app.post('/api/admin/database/restore-json', requireAuth, requireAdmin, (req: AuthenticatedRequest, res) => {
+    try {
+      const { backupData } = req.body;
+      if (!backupData) return res.status(400).json({ error: 'backupData is required.' });
+      const raw = typeof backupData === 'string' ? backupData : JSON.stringify(backupData);
+      db.restoreBackupJson(raw);
+      db.addAdminAudit(
+        req.user!.id,
+        req.user!.email,
+        'RESTORE_DATABASE',
+        'settings',
+        'database',
+        'Admin restored database from JSON backup',
+        getClientIp(req),
+        String(req.headers['user-agent'] || '')
+      );
+      res.json({ ok: true, message: 'Database restored successfully from backup payload.' });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
   });
 
   // --- VITE DEV / STATIC SERVING ---
