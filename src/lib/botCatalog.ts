@@ -4,6 +4,7 @@ import wolfbotImg from '../assets/images/bot_card_wolfbot_1790943640357.jpg';
 import toxicMdImg from '../assets/images/bot_card_toxic_md_1790943651976.jpg';
 import ultraGuruImg from '../assets/images/bot_card_ultra_guru_1790943661872.jpg';
 import keithMdImg from '../assets/images/bot_card_keith_md_1790944611163.jpg';
+import blackPantherImg from '../assets/images/bot_card_black_panther_1790947338047.jpg';
 
 export interface CatalogBotItem {
   id: string;
@@ -24,8 +25,25 @@ export interface CatalogBotItem {
 
 export const BOT_CATALOG: CatalogBotItem[] = [
   {
-    id: 'keith-md',
+    id: 'black-panther',
     rank: 1,
+    name: 'BLACK PANTHER',
+    author: 'Koyoteh',
+    description:
+      'BLACK-PANTHER Multi-Device WhatsApp Bot — High-speed automation, anti-delete protection, media tools, and instant session pairing.',
+    repoUrl: 'https://github.com/koyoteh/BLACK-PANTHER',
+    branch: 'main',
+    startCommand: 'npm start',
+    buildCommand: 'npm install',
+    sessionEnvKey: 'SESSION_ID',
+    sessionGeneratorUrl: 'https://ultra-guru-pair-1.onrender.com/pair',
+    image: blackPantherImg,
+    deploymentsCount: 5480,
+    featuredLabel: 'NEW RELEASE',
+  },
+  {
+    id: 'keith-md',
+    rank: 2,
     name: 'KEITH MD',
     author: 'Kkeizza (Keith)',
     description:
@@ -42,7 +60,7 @@ export const BOT_CATALOG: CatalogBotItem[] = [
   },
   {
     id: 'lyrical-xmd',
-    rank: 2,
+    rank: 3,
     name: 'LYRICAL XMD',
     author: 'LYRICAL Labs',
     description:
@@ -59,7 +77,7 @@ export const BOT_CATALOG: CatalogBotItem[] = [
   },
   {
     id: 'arslan-md',
-    rank: 3,
+    rank: 4,
     name: 'ARSLAN-MD',
     author: 'Lyrical57',
     description:
@@ -75,7 +93,7 @@ export const BOT_CATALOG: CatalogBotItem[] = [
   },
   {
     id: 'wolfbot-md',
-    rank: 4,
+    rank: 5,
     name: 'WOLFBOT',
     author: 'Briton Kiplangat',
     description:
@@ -91,7 +109,7 @@ export const BOT_CATALOG: CatalogBotItem[] = [
   },
   {
     id: 'toxic-md',
-    rank: 5,
+    rank: 6,
     name: 'Toxic-MD',
     author: 'Clinton Mwenda (xhclintohn)',
     description:
@@ -107,7 +125,7 @@ export const BOT_CATALOG: CatalogBotItem[] = [
   },
   {
     id: 'ultra-guru',
-    rank: 6,
+    rank: 7,
     name: 'ULTRA GURU',
     author: 'Akida Rajab',
     description:
@@ -123,7 +141,7 @@ export const BOT_CATALOG: CatalogBotItem[] = [
   },
   {
     id: 'custom-github-bot',
-    rank: 7,
+    rank: 8,
     name: 'Custom GitHub Bot',
     author: 'Your Repository',
     description:

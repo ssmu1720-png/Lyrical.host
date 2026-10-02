@@ -6,7 +6,7 @@ import { db, hashPassword, verifyPassword, UserRecord, BotRecord, DeploymentReco
 import { processManager } from './src/server/processManager.ts';
 import { deploymentService } from './src/server/deploymentService.ts';
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 interface AuthenticatedRequest extends Request {
   user?: UserRecord;
