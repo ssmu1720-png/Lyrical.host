@@ -1,0 +1,275 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email == 'ssmu1720@gmail.com' && request.auth.token.email_verified == true) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'email', 'name', 'role', 'suspended', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'name', 'role', 'suspended', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
+        data.role is string && (data.role == 'user' || data.role == 'admin') &&
+        data.suspended is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidBotDocument(data) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'name', 'description', 'runtime', 'repoUrl',
+          'branch', 'startCommand', 'port', 'region', 'status',
+          'whatsappAuthMethod', 'whatsappState', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'name', 'description', 'runtime', 'repoUrl',
+          'branch', 'startCommand', 'port', 'region', 'status',
+          'whatsappAuthMethod', 'whatsappState', 'createdAt', 'updatedAt'
+        ]) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 64 &&
+        data.description is string && data.description.size() <= 240 &&
+        data.runtime is string && (data.runtime == 'nodejs' || data.runtime == 'python') &&
+        data.repoUrl is string && data.repoUrl.size() <= 300 &&
+        data.branch is string && data.branch.size() >= 1 && data.branch.size() <= 64 &&
+        data.startCommand is string && data.startCommand.size() >= 1 && data.startCommand.size() <= 160 &&
+        data.port is int && data.port >= 1 && data.port <= 65535 &&
+        data.region is string && data.region.size() >= 1 && data.region.size() <= 64 &&
+        data.status is string && (data.status == 'running' || data.status == 'stopped' || data.status == 'deploying' || data.status == 'failed') &&
+        data.whatsappAuthMethod is string && (data.whatsappAuthMethod == 'pairing_code' || data.whatsappAuthMethod == 'qr_code') &&
+        data.whatsappState is string && (
+          data.whatsappState == 'CONNECTED' ||
+          data.whatsappState == 'CONNECTING' ||
+          data.whatsappState == 'DISCONNECTED' ||
+          data.whatsappState == 'AUTHENTICATION REQUIRED' ||
+          data.whatsappState == 'ERROR'
+        ) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidDeploymentDocument(data) {
+      return data.keys().hasAll(['id', 'botId', 'ownerId', 'botName', 'status', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'botId', 'ownerId', 'botName', 'status', 'createdAt']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.botId is string && data.botId.size() >= 1 && data.botId.size() <= 64 && data.botId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.botName is string && data.botName.size() >= 1 && data.botName.size() <= 64 &&
+        data.status is string && (
+          data.status == 'pending' ||
+          data.status == 'building' ||
+          data.status == 'running' ||
+          data.status == 'success' ||
+          data.status == 'failed'
+        ) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidNotificationDocument(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'title', 'message', 'read', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'ownerId', 'title', 'message', 'read', 'createdAt']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+        data.message is string && data.message.size() >= 1 && data.message.size() <= 400 &&
+        data.read is bool &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidAdminAuditDocument(data) {
+      return data.keys().hasAll(['id', 'adminId', 'adminEmail', 'action', 'targetId', 'details', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'adminId', 'adminEmail', 'action', 'targetId', 'details', 'createdAt']) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.adminId is string && data.adminId.size() >= 1 && data.adminId.size() <= 128 && data.adminId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.adminEmail is string && data.adminEmail.size() >= 3 && data.adminEmail.size() <= 160 &&
+        data.action is string && data.action.size() >= 1 && data.action.size() <= 80 &&
+        data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
+        data.details is string && data.details.size() <= 300 &&
+        data.createdAt is timestamp;
+    }
+
+    // Admins lookup collection (Read-only for verification)
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isValidId(adminId) && (request.auth.uid == adminId || isAdmin());
+      allow list, create, update, delete: if false;
+    }
+
+    // Users Collection (PII Isolated to Owner or Admin)
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() &&
+        isValidId(userId) &&
+        isOwner(userId) &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == request.auth.uid &&
+        incoming().suspended == false &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (incoming().role == 'user' || isAdmin());
+
+      allow update: if isSignedIn() &&
+        isValidId(userId) &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (
+            isOwner(userId) &&
+            existing().suspended == false &&
+            incoming().role == existing().role &&
+            incoming().suspended == existing().suspended &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'email', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isSignedIn() && isValidId(userId) && isAdmin();
+    }
+
+    // Bots Collection
+    match /bots/{botId} {
+      allow get: if isSignedIn() && isValidId(botId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() &&
+        isValidId(botId) &&
+        isValidBotDocument(incoming()) &&
+        incoming().id == botId &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+
+      allow update: if isSignedIn() &&
+        isValidId(botId) &&
+        isValidBotDocument(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (
+            existing().ownerId == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'description', 'repoUrl', 'branch', 'startCommand',
+              'port', 'status', 'whatsappAuthMethod', 'whatsappState', 'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isSignedIn() && isValidId(botId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Deployments Collection (Terminal state locked once success or failed)
+    match /deployments/{deploymentId} {
+      allow get: if isSignedIn() && isValidId(deploymentId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() &&
+        isValidId(deploymentId) &&
+        isValidDeploymentDocument(incoming()) &&
+        incoming().id == deploymentId &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/bots/$(incoming().botId));
+
+      allow update: if isSignedIn() &&
+        isValidId(deploymentId) &&
+        isValidDeploymentDocument(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().botId == existing().botId &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          isAdmin() ||
+          (
+            existing().ownerId == request.auth.uid &&
+            existing().status != 'success' &&
+            existing().status != 'failed' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status'])
+          )
+        );
+
+      allow delete: if isSignedIn() && isValidId(deploymentId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Notifications Collection
+    match /notifications/{notificationId} {
+      allow get: if isSignedIn() && isValidId(notificationId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() &&
+        isValidId(notificationId) &&
+        isValidNotificationDocument(incoming()) &&
+        incoming().id == notificationId &&
+        incoming().createdAt == request.time &&
+        (incoming().ownerId == request.auth.uid || isAdmin());
+
+      allow update: if isSignedIn() &&
+        isValidId(notificationId) &&
+        isValidNotificationDocument(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          isAdmin() ||
+          (
+            existing().ownerId == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['read'])
+          )
+        );
+
+      allow delete: if isSignedIn() && isValidId(notificationId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Admin Audit Actions Collection
+    match /adminActions/{actionId} {
+      allow get: if isSignedIn() && isValidId(actionId) && isAdmin();
+      allow list: if isSignedIn() && isAdmin() && resource.data.adminId is string;
+
+      allow create: if isSignedIn() &&
+        isValidId(actionId) &&
+        isValidAdminAuditDocument(incoming()) &&
+        incoming().id == actionId &&
+        incoming().adminId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        isAdmin();
+
+      allow update, delete: if false;
+    }
+  }
+}

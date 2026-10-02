@@ -1,0 +1,255 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile document in Firestore",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 80,
+          "minLength": 1
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "admin"]
+        },
+        "suspended": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "name", "role", "suspended", "createdAt", "updatedAt"]
+    },
+    "BotDocument": {
+      "title": "BotDocument",
+      "description": "WhatsApp bot metadata synced to Firestore",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 2
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "runtime": {
+          "type": "string",
+          "enum": ["nodejs", "python"]
+        },
+        "repoUrl": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "branch": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "startCommand": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "port": {
+          "type": "number"
+        },
+        "region": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "status": {
+          "type": "string",
+          "enum": ["running", "stopped", "deploying", "failed"]
+        },
+        "whatsappAuthMethod": {
+          "type": "string",
+          "enum": ["pairing_code", "qr_code"]
+        },
+        "whatsappState": {
+          "type": "string",
+          "enum": ["CONNECTED", "CONNECTING", "DISCONNECTED", "AUTHENTICATION REQUIRED", "ERROR"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "name",
+        "description",
+        "runtime",
+        "repoUrl",
+        "branch",
+        "startCommand",
+        "port",
+        "region",
+        "status",
+        "whatsappAuthMethod",
+        "whatsappState",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "DeploymentDocument": {
+      "title": "DeploymentDocument",
+      "description": "Deployment history record in Firestore",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "botId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "botName": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "building", "running", "success", "failed"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "botId", "ownerId", "botName", "status", "createdAt"]
+    },
+    "NotificationDocument": {
+      "title": "NotificationDocument",
+      "description": "User notification record in Firestore",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "read": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "ownerId", "title", "message", "read", "createdAt"]
+    },
+    "AdminAuditDocument": {
+      "title": "AdminAuditDocument",
+      "description": "Administrator audit action log in Firestore",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "adminId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "adminEmail": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "action": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "targetId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "details": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "adminId", "adminEmail", "action", "targetId", "details", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user account profiles and roles"
+    },
+    "/bots/{botId}": {
+      "schema": { "$ref": "#/entities/BotDocument" },
+      "description": "WhatsApp bot instance records"
+    },
+    "/deployments/{deploymentId}": {
+      "schema": { "$ref": "#/entities/DeploymentDocument" },
+      "description": "Bot deployment execution logs and states"
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/NotificationDocument" },
+      "description": "User alerts and deployment notifications"
+    },
+    "/adminActions/{actionId}": {
+      "schema": { "$ref": "#/entities/AdminAuditDocument" },
+      "description": "Administrator audit logs"
+    }
+  }
+}
