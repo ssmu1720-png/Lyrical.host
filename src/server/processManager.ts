@@ -22,6 +22,7 @@ class RealProcessManager {
   private processes: Map<string, RunningBotProcess> = new Map();
   private logArchive: Map<string, string[]> = new Map();
   private watchdogInterval: NodeJS.Timeout | null = null;
+  private autoStartInterval: NodeJS.Timeout | null = null;
   private restartBackoffs: Map<string, { count: number; lastAttempt: number }> = new Map();
 
   constructor() {
@@ -47,6 +48,46 @@ class RealProcessManager {
     }
     db.save();
     this.startWatchdog();
+    this.start3MinuteAutoStarter();
+  }
+
+  /**
+   * 3-Minute Auto-Starter Heartbeat
+   * Verifies every bot every 3 minutes (180s) and automatically wakes up / starts any inactive or sleeping bot
+   */
+  public start3MinuteAutoStarter(): void {
+    if (this.autoStartInterval) return;
+    this.autoStartInterval = setInterval(() => {
+      this.run3MinuteAutoStartCycle().catch((err) => {
+        console.error('[3-MIN-AUTO-STARTER-ERR]', err);
+      });
+    }, 3 * 60 * 1000); // exactly every 3 minutes
+  }
+
+  public async run3MinuteAutoStartCycle(): Promise<void> {
+    for (const bot of db.state.bots) {
+      if (bot.autoRestart === false) continue;
+      const proc = this.processes.get(bot.id);
+      let isRunning = false;
+      if (proc && proc.pid) {
+        try {
+          process.kill(proc.pid, 0);
+          isRunning = true;
+        } catch {
+          isRunning = false;
+        }
+      }
+
+      if (!isRunning) {
+        this.appendLog(
+          bot.id,
+          `[3-MIN-AUTO-STARTER] Scheduled 3-minute heartbeat: bot "${bot.name}" is sleeping/inactive. Automatically starting up...`
+        );
+        this.startBot(bot).catch((err) => {
+          this.appendLog(bot.id, `[3-MIN-AUTO-STARTER-ERR] Auto-start failed: ${err.message}`);
+        });
+      }
+    }
   }
 
   /**
@@ -321,14 +362,39 @@ class RealProcessManager {
         this.ensureBotWorkspaceFiles(bot, botDir);
       }
 
-      // Step 2: Build / Install dependencies if buildCommand is specified
+      // Step 2: Build / Install dependencies (with --legacy-peer-deps to prevent peer conflicts)
+      const pkgPath = path.join(botDir, 'package.json');
+      const hasPkg = fs.existsSync(pkgPath);
+
       if (bot.buildCommand && bot.buildCommand.trim() !== '') {
-        this.appendLog(bot.id, `Executing build command: ${bot.buildCommand}`, deployment.id);
-        const parts = bot.buildCommand.trim().split(/\s+/);
-        await this.runCommandStep(bot.id, deployment.id, parts[0], parts.slice(1), botDir);
-      } else if (bot.repoUrl && fs.existsSync(path.join(botDir, 'package.json'))) {
-        this.appendLog(bot.id, `package.json found. Running 'npm install --omit=dev'...`, deployment.id);
-        await this.runCommandStep(bot.id, deployment.id, 'npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], botDir);
+        let cmd = bot.buildCommand.trim();
+        if (cmd === 'npm install' || cmd === 'npm i') {
+          cmd = 'npm install --legacy-peer-deps --no-audit --no-fund';
+        }
+        this.appendLog(bot.id, `Executing build command: ${cmd}`, deployment.id);
+        const parts = cmd.split(/\s+/);
+        try {
+          await this.runCommandStep(bot.id, deployment.id, parts[0], parts.slice(1), botDir);
+        } catch (buildErr: any) {
+          this.appendLog(bot.id, `[BUILD-WARN] ${buildErr.message}. Attempting install fallback with --legacy-peer-deps...`, deployment.id);
+          await this.runCommandStep(bot.id, deployment.id, 'npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund'], botDir);
+        }
+      } else if (hasPkg) {
+        this.appendLog(bot.id, `package.json found. Installing all dependencies with '--legacy-peer-deps'...`, deployment.id);
+        await this.runCommandStep(bot.id, deployment.id, 'npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund'], botDir);
+      }
+
+      // Automatically detect start command from package.json if available
+      if (hasPkg) {
+        try {
+          const pkgJson = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+          if (pkgJson.scripts && pkgJson.scripts.start && (!bot.startCommand || bot.startCommand === 'node index.js')) {
+            bot.startCommand = 'npm start';
+            db.save();
+          }
+        } catch {
+          // ignore
+        }
       }
 
       // Step 3: Spawn runtime process

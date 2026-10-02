@@ -75,96 +75,108 @@ const originalRequire = Module.prototype.require;
 
 Module.prototype.require = function (id) {
   const loaded = originalRequire.apply(this, arguments);
+  try {
+    if (!loaded || typeof loaded !== 'object') {
+      return loaded;
+    }
 
-  // Guard megajs against unhandled EBLOCKED (-16) or expired default session links
-  if (id === 'megajs' && loaded && loaded.File && typeof loaded.File.fromURL === 'function') {
-    const origFromURL = loaded.File.fromURL.bind(loaded.File);
-    loaded.File.fromURL = function (url) {
-      const fileInstance = origFromURL(url);
-      if (fileInstance && typeof fileInstance.download === 'function') {
-        const origDownload = fileInstance.download.bind(fileInstance);
-        fileInstance.download = function (cb) {
-          if (typeof cb === 'function') {
-            return origDownload((err, data) => {
-              if (err) {
-                console.log(
-                  `[LYRICAL-SESSION-GUARD] MEGA session download skipped (${
-                    err.message || err
-                  }). Falling back to direct WhatsApp Pairing Code / QR authentication.`
-                );
-                return;
-              }
-              cb(null, data);
-            });
-          }
-          return origDownload.apply(this, arguments);
-        };
-      }
-      return fileInstance;
-    };
-  }
+    // Guard megajs against unhandled EBLOCKED (-16) or expired default session links
+    if (id === 'megajs' && loaded.File && typeof loaded.File.fromURL === 'function') {
+      const origFromURL = loaded.File.fromURL.bind(loaded.File);
+      loaded.File.fromURL = function (url) {
+        const fileInstance = origFromURL(url);
+        if (fileInstance && typeof fileInstance.download === 'function') {
+          const origDownload = fileInstance.download.bind(fileInstance);
+          fileInstance.download = function (cb) {
+            if (typeof cb === 'function') {
+              return origDownload((err, data) => {
+                if (err) {
+                  console.log(
+                    `[LYRICAL-SESSION-GUARD] MEGA session download skipped (${
+                      err.message || err
+                    }). Falling back to direct WhatsApp Pairing Code / QR authentication.`
+                  );
+                  return;
+                }
+                cb(null, data);
+              });
+            }
+            return origDownload.apply(this, arguments);
+          };
+        }
+        return fileInstance;
+      };
+    }
 
-  // Hook @whiskeysockets/baileys or @adiwajshing/baileys to emit live QR and Pairing Codes
-  if (
-    (id === '@whiskeysockets/baileys' || id === '@adiwajshing/baileys' || id === 'baileys') &&
-    loaded
-  ) {
-    const wrapMakeWASocket = (origFn) => {
-      return function () {
-        const sock = origFn.apply(this, arguments);
-        try {
-          const authMethod = process.env.WHATSAPP_AUTH_METHOD || 'pairing_code';
-          const rawPhone = (process.env.WHATSAPP_PHONE || '').replace(/[^0-9]/g, '');
-          let pairingRequested = false;
+    // Hook @whiskeysockets/baileys or @adiwajshing/baileys to emit live QR and Pairing Codes
+    if (
+      (id === '@whiskeysockets/baileys' || id === '@adiwajshing/baileys' || id === 'baileys') &&
+      Object.isExtensible(loaded) &&
+      !Object.isFrozen(loaded)
+    ) {
+      const wrapMakeWASocket = (origFn) => {
+        return function () {
+          const sock = origFn.apply(this, arguments);
+          try {
+            const authMethod = process.env.WHATSAPP_AUTH_METHOD || 'pairing_code';
+            const rawPhone = (process.env.WHATSAPP_PHONE || '').replace(/[^0-9]/g, '');
+            let pairingRequested = false;
 
-          if (sock && sock.ev && typeof sock.ev.on === 'function') {
-            sock.ev.on('connection.update', async (update) => {
-              const { connection, qr } = update || {};
+            if (sock && sock.ev && typeof sock.ev.on === 'function') {
+              sock.ev.on('connection.update', async (update) => {
+                const { connection, qr } = update || {};
 
-              if (qr) {
-                console.log('QR_CODE_DATA:' + qr);
+                if (qr) {
+                  console.log('QR_CODE_DATA:' + qr);
 
-                if (
-                  authMethod === 'pairing_code' &&
-                  rawPhone.length >= 7 &&
-                  !pairingRequested &&
-                  typeof sock.requestPairingCode === 'function'
-                ) {
-                  pairingRequested = true;
-                  try {
-                    const code = await sock.requestPairingCode(rawPhone);
-                    const formatted =
-                      code && code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
-                    console.log(`PAIRING CODE: ${formatted}`);
-                  } catch (pairErr) {
-                    console.log(
-                      `[WHATSAPP-PAIR-WARN] Could not request pairing code: ${pairErr.message}`
-                    );
+                  if (
+                    authMethod === 'pairing_code' &&
+                    rawPhone.length >= 7 &&
+                    !pairingRequested &&
+                    typeof sock.requestPairingCode === 'function'
+                  ) {
+                    pairingRequested = true;
+                    try {
+                      const code = await sock.requestPairingCode(rawPhone);
+                      const formatted =
+                        code && code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
+                      console.log(`PAIRING CODE: ${formatted}`);
+                    } catch (pairErr) {
+                      console.log(
+                        `[WHATSAPP-PAIR-WARN] Could not request pairing code: ${pairErr.message}`
+                      );
+                    }
                   }
                 }
-              }
 
-              if (connection === 'open') {
-                console.log('WhatsApp Connected! Session established.');
-              }
-            });
+                if (connection === 'open') {
+                  console.log('WhatsApp Connected! Session established.');
+                }
+              });
+            }
+          } catch {
+            // ignore bridge hook error
           }
-        } catch {
-          // ignore bridge hook error
-        }
-        return sock;
+          return sock;
+        };
       };
-    };
 
-    if (typeof loaded.default === 'function' && !loaded.__lyricalWrapped) {
-      const wrapped = wrapMakeWASocket(loaded.default);
-      Object.assign(wrapped, loaded.default);
-      loaded.default = wrapped;
-      if (typeof loaded.makeWASocket === 'function') {
-        loaded.makeWASocket = wrapped;
+      if (typeof loaded.default === 'function' && !loaded.__lyricalWrapped) {
+        const wrapped = wrapMakeWASocket(loaded.default);
+        try {
+          Object.assign(wrapped, loaded.default);
+          loaded.default = wrapped;
+          if (typeof loaded.makeWASocket === 'function') {
+            loaded.makeWASocket = wrapped;
+          }
+          Object.defineProperty(loaded, '__lyricalWrapped', { value: true });
+        } catch {
+          // ignore mutation errors on read-only modules
+        }
       }
-      Object.defineProperty(loaded, '__lyricalWrapped', { value: true });
     }
+  } catch {
+    // Never allow hook failure to crash host process or loader
   }
 
   return loaded;

@@ -32,6 +32,7 @@ import {
   GithubRepoItem,
   syncBotDocumentToFirestore,
   deleteBotDocumentFromFirestore,
+  formatAuthError,
 } from '../lib/workspaceAuth';
 
 export const BotDetailPage: React.FC = () => {
@@ -82,13 +83,17 @@ export const BotDetailPage: React.FC = () => {
     setError(null);
     try {
       if (!getGithubAccessToken()) {
-        await githubSignIn();
+        const gh = await githubSignIn();
+        if (!gh) return;
       }
       const repos = await listUserGithubRepos();
       setGithubRepos(repos);
       setShowGithubList(true);
     } catch (err: any) {
-      setError(err.message || 'Could not load GitHub repositories.');
+      const friendly = formatAuthError(err);
+      if (friendly) {
+        setError(friendly);
+      }
     }
   };
 
@@ -255,12 +260,16 @@ export const BotDetailPage: React.FC = () => {
       setNotice(`Backed up "${selectedFile}" to your Google Drive as "${driveName}".`);
     } catch (err: any) {
       if (err.message === 'NEEDS_GOOGLE_AUTH') {
-        await googleSignIn();
+        const g = await googleSignIn();
+        if (!g) return;
         const driveName = `LYRICAL_${bot.name.replace(/\s+/g, '_')}_${selectedFile}`;
         await saveFileToGoogleDrive(driveName, fileContent);
         setNotice(`Backed up "${selectedFile}" to your Google Drive.`);
       } else {
-        setError(err.message);
+        const friendly = formatAuthError(err);
+        if (friendly) {
+          setError(friendly);
+        }
       }
     }
   };

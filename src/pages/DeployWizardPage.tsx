@@ -108,6 +108,7 @@ export const DeployWizardPage: React.FC = () => {
     setGithubError(null);
     try {
       const authRes = await githubSignIn();
+      if (!authRes) return;
       setGithubConnectedUser({ login: authRes.githubUsername });
       const repos = await listUserGithubRepos();
       setGithubRepos(repos);

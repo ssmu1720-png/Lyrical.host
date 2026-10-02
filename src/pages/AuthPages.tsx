@@ -8,6 +8,7 @@ import {
   firebaseLoginEmailPassword,
   firebaseRegisterEmailPassword,
   firebaseResetPasswordEmail,
+  formatAuthError,
 } from '../lib/workspaceAuth';
 
 interface AuthProps {
@@ -119,7 +120,11 @@ export const LoginPage: React.FC<AuthProps> = ({ onAuthenticated }) => {
     setError(null);
     try {
       const result = await googleSignIn();
-      if (result && result.user.email) {
+      if (!result) {
+        // User closed or dismissed the popup window
+        return;
+      }
+      if (result.user.email) {
         const res = await apiRequest<{ token: string; user: User }>('/api/auth/google-sync', {
           method: 'POST',
           body: JSON.stringify({
@@ -132,7 +137,10 @@ export const LoginPage: React.FC<AuthProps> = ({ onAuthenticated }) => {
         navigate('/dashboard');
       }
     } catch (err: any) {
-      setError(err.message || 'Google authentication could not be completed.');
+      const friendly = formatAuthError(err);
+      if (friendly) {
+        setError(friendly);
+      }
     } finally {
       setLoading(false);
     }
@@ -143,7 +151,11 @@ export const LoginPage: React.FC<AuthProps> = ({ onAuthenticated }) => {
     setError(null);
     try {
       const result = await githubSignIn();
-      if (result && result.email) {
+      if (!result) {
+        // User closed or dismissed the popup window
+        return;
+      }
+      if (result.email) {
         const res = await apiRequest<{ token: string; user: User }>('/api/auth/google-sync', {
           method: 'POST',
           body: JSON.stringify({
@@ -160,7 +172,10 @@ export const LoginPage: React.FC<AuthProps> = ({ onAuthenticated }) => {
         setShowProviderGuide(true);
         setError('Enable the GitHub provider in Firebase Console → Authentication → Sign-in method → GitHub.');
       } else {
-        setError(err.message || 'GitHub authentication could not be completed.');
+        const friendly = formatAuthError(err);
+        if (friendly) {
+          setError(friendly);
+        }
       }
     } finally {
       setLoading(false);
@@ -313,7 +328,10 @@ export const RegisterPage: React.FC<AuthProps> = ({ onAuthenticated }) => {
     setError(null);
     try {
       const result = await googleSignIn();
-      if (result && result.user.email) {
+      if (!result) {
+        return;
+      }
+      if (result.user.email) {
         const res = await apiRequest<{ token: string; user: User }>('/api/auth/google-sync', {
           method: 'POST',
           body: JSON.stringify({
@@ -326,7 +344,10 @@ export const RegisterPage: React.FC<AuthProps> = ({ onAuthenticated }) => {
         navigate('/dashboard');
       }
     } catch (err: any) {
-      setError(err.message || 'Google sign-in failed.');
+      const friendly = formatAuthError(err);
+      if (friendly) {
+        setError(friendly);
+      }
     } finally {
       setLoading(false);
     }
@@ -337,7 +358,10 @@ export const RegisterPage: React.FC<AuthProps> = ({ onAuthenticated }) => {
     setError(null);
     try {
       const result = await githubSignIn();
-      if (result && result.email) {
+      if (!result) {
+        return;
+      }
+      if (result.email) {
         const res = await apiRequest<{ token: string; user: User }>('/api/auth/google-sync', {
           method: 'POST',
           body: JSON.stringify({
@@ -353,7 +377,10 @@ export const RegisterPage: React.FC<AuthProps> = ({ onAuthenticated }) => {
       if (err?.code === 'auth/operation-not-allowed') {
         setError('Enable the GitHub provider in Firebase Console → Authentication → Sign-in method → GitHub.');
       } else {
-        setError(err.message || 'GitHub sign-in failed.');
+        const friendly = formatAuthError(err);
+        if (friendly) {
+          setError(friendly);
+        }
       }
     } finally {
       setLoading(false);

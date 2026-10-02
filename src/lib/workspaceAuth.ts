@@ -310,7 +310,7 @@ export const githubSignIn = async (): Promise<{
   githubAccessToken: string;
   githubUsername: string;
   email: string;
-}> => {
+} | null> => {
   try {
     isSigningIn = true;
     let result;
@@ -379,6 +379,14 @@ export const githubSignIn = async (): Promise<{
       githubUsername: ghLogin,
       email: ghEmail,
     };
+  } catch (error: any) {
+    if (
+      error?.code === 'auth/popup-closed-by-user' ||
+      error?.code === 'auth/cancelled-popup-request'
+    ) {
+      return null;
+    }
+    throw error;
   } finally {
     isSigningIn = false;
   }
@@ -441,12 +449,41 @@ export const googleSignIn = async (): Promise<{
     await syncUserProfileToFirestore(result.user);
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
+    if (
+      error?.code === 'auth/popup-closed-by-user' ||
+      error?.code === 'auth/cancelled-popup-request'
+    ) {
+      // User closed or dismissed the popup window voluntarily
+      return null;
+    }
     console.error('Sign in error:', error);
     throw error;
   } finally {
     isSigningIn = false;
   }
 };
+
+export function formatAuthError(error: any): string | null {
+  if (!error) return null;
+  const code = error?.code || '';
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return null;
+  }
+  if (code === 'auth/popup-blocked') {
+    return 'The sign-in popup was blocked by your browser. Please allow popups for this site and try again.';
+  }
+  if (code === 'auth/unauthorized-domain') {
+    const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'your-domain.app';
+    return `This domain is not authorized in Firebase. In Firebase Console → Authentication → Settings → Authorized domains, add: ${currentHost}`;
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return 'This authentication provider is not enabled in Firebase Console. Go to Firebase Console → Authentication → Sign-in method and enable it.';
+  }
+  if (code === 'auth/network-request-failed') {
+    return 'Network connection issue. Please check your internet connection and try again.';
+  }
+  return error.message || 'Authentication could not be completed.';
+}
 
 export const getAccessToken = async (): Promise<string | null> => {
   return cachedAccessToken;
