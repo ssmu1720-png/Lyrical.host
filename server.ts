@@ -464,6 +464,7 @@ async function startServer() {
       .filter(b => b.userId === req.user!.id)
       .map(b => ({
         ...b,
+        liveUrl: `/live/${b.id}/`,
         telemetry: processManager.getBotLiveTelemetry(b),
       }));
     res.json({ bots: userBots });
@@ -481,7 +482,7 @@ async function startServer() {
     const files = processManager.listWorkspaceFiles(bot.id);
 
     res.json({
-      bot: { ...bot, telemetry },
+      bot: { ...bot, liveUrl: `/live/${bot.id}/`, telemetry },
       envVars,
       deployments,
       server,
@@ -503,6 +504,7 @@ async function startServer() {
       const {
         name,
         description = '',
+        category = 'whatsapp_bot',
         runtime = 'nodejs',
         repoUrl = '',
         branch = 'main',
@@ -531,6 +533,7 @@ async function startServer() {
         userId: user.id,
         name: String(name).trim().slice(0, 64),
         description: String(description).trim().slice(0, 240),
+        category: category === 'website' ? 'website' : category === 'web_service' ? 'web_service' : 'whatsapp_bot',
         runtime: runtime === 'python' ? 'python' : 'nodejs',
         repoUrl: String(repoUrl || '').trim(),
         branch: String(branch || 'main').trim(),
@@ -543,7 +546,7 @@ async function startServer() {
         status: 'deploying',
         whatsappAuthMethod: whatsappAuthMethod === 'qr_code' ? 'qr_code' : 'pairing_code',
         whatsappPhone: String(whatsappPhone || '').trim(),
-        whatsappState: 'CONNECTING',
+        whatsappState: category === 'website' ? 'CONNECTED' : 'CONNECTING',
         whatsappQr: null,
         whatsappPairingCode: null,
         pid: null,
@@ -1430,6 +1433,110 @@ async function startServer() {
       res.json({ ok: true, message: 'Database restored successfully from backup payload.' });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
+    }
+  });
+
+  // --- LIVE WEBSITE & APPLICATION REVERSE PROXY ---
+  app.use('/live/:id', (req: Request, res: Response) => {
+    const botId = req.params.id;
+    const bot = db.state.bots.find(b => b.id === botId);
+
+    if (!bot) {
+      return res.status(404).send(`
+        <!DOCTYPE html>
+        <html>
+        <head><title>Website Not Found - LYRICAL</title><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+        <body style="font-family:system-ui,sans-serif;background:#090d16;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:20px;box-sizing:border-box;">
+          <div style="background:#0f172a;border:1px solid #1e293b;border-radius:16px;padding:32px;max-width:480px;text-align:center;box-shadow:0 20px 40px rgba(0,0,0,0.5);">
+            <div style="font-size:36px;margin-bottom:12px;">🔍</div>
+            <h1 style="font-size:20px;font-weight:700;margin:0 0 8px;color:#38bdf8;">Website or Service Not Found</h1>
+            <p style="font-size:14px;color:#94a3b8;line-height:1.5;margin:0 0 20px;">No deployed web instance exists for ID <code>${botId}</code>.</p>
+            <a href="/dashboard" style="display:inline-block;background:#38bdf8;color:#090d16;text-decoration:none;font-weight:600;padding:10px 20px;border-radius:8px;font-size:13px;">Return to Console</a>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    // Ensure trailing slash for root URL so relative paths in HTML/JS resolve properly
+    const cleanOriginal = req.originalUrl.split('?')[0];
+    if (cleanOriginal === `/live/${botId}`) {
+      const search = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
+      return res.redirect(302, `/live/${botId}/${search}`);
+    }
+
+    if (bot.status !== 'running') {
+      return res.status(503).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>${bot.name} - Starting Up</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <meta http-equiv="refresh" content="5">
+        </head>
+        <body style="font-family:system-ui,sans-serif;background:#090d16;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:20px;box-sizing:border-box;">
+          <div style="background:#0f172a;border:1px solid #1e293b;border-radius:16px;padding:32px;max-width:500px;text-align:center;box-shadow:0 20px 40px rgba(0,0,0,0.5);">
+            <div style="display:inline-block;width:36px;height:36px;border:3px solid rgba(56,189,248,0.2);border-top-color:#38bdf8;border-radius:50%;animation:spin 1s linear infinite;margin-bottom:16px;"></div>
+            <style>@keyframes spin { 100% { transform: rotate(360deg); } }</style>
+            <h1 style="font-size:20px;font-weight:700;margin:0 0 8px;color:#38bdf8;">${bot.name} is ${bot.status}</h1>
+            <p style="font-size:14px;color:#94a3b8;line-height:1.5;margin:0 0 16px;">This website or web service container is currently <strong>${bot.status}</strong>. This page will automatically refresh once the process is ready.</p>
+            <div style="font-size:12px;color:#64748b;margin-bottom:20px;">Assigned Port: ${bot.port || 8080} · Runtime: ${bot.runtime}</div>
+            <div style="display:flex;gap:10px;justify-content:center;">
+              <button onclick="location.reload()" style="background:#1e293b;color:#e2e8f0;border:1px solid #334155;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;">Refresh Now</button>
+              <a href="/bots/${bot.id}" style="display:inline-block;background:#38bdf8;color:#090d16;text-decoration:none;font-weight:600;padding:8px 16px;border-radius:8px;font-size:13px;">View Build Logs</a>
+            </div>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    const targetPort = bot.port || 8080;
+    const targetPath = req.url.startsWith('/') ? req.url : `/${req.url}`;
+
+    const proxyReq = http.request(
+      {
+        host: '127.0.0.1',
+        port: targetPort,
+        path: targetPath,
+        method: req.method,
+        headers: {
+          ...req.headers,
+          host: `127.0.0.1:${targetPort}`,
+          'x-forwarded-host': req.headers.host || '',
+          'x-forwarded-proto': req.protocol || 'http',
+          'x-forwarded-prefix': `/live/${botId}`,
+        },
+      },
+      (proxyRes) => {
+        res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
+        proxyRes.pipe(res);
+      }
+    );
+
+    proxyReq.on('error', (err) => {
+      if (!res.headersSent) {
+        res.status(502).send(`
+          <!DOCTYPE html>
+          <html>
+          <head><title>${bot.name} - Gateway Connecting</title><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="4"></head>
+          <body style="font-family:system-ui,sans-serif;background:#090d16;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:20px;box-sizing:border-box;">
+            <div style="background:#0f172a;border:1px solid #1e293b;border-radius:16px;padding:32px;max-width:500px;text-align:center;">
+              <h1 style="font-size:18px;color:#38bdf8;margin:0 0 8px;">Waiting for Web Server on Port ${targetPort}</h1>
+              <p style="font-size:13px;color:#94a3b8;line-height:1.5;margin:0 0 16px;">The process is running (PID: ${bot.pid || 'Active'}), but the internal HTTP server on port ${targetPort} is still starting up. Retrying automatically in 4 seconds...</p>
+              <div style="font-size:11px;font-family:monospace;color:#64748b;margin-bottom:16px;">${err.message}</div>
+              <a href="/bots/${bot.id}" style="display:inline-block;background:#38bdf8;color:#090d16;text-decoration:none;font-weight:600;padding:8px 16px;border-radius:8px;font-size:13px;">View Console</a>
+            </div>
+          </body>
+          </html>
+        `);
+      }
+    });
+
+    if (req.readable) {
+      req.pipe(proxyReq);
+    } else {
+      proxyReq.end();
     }
   });
 

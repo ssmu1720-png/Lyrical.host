@@ -7,7 +7,6 @@ function resolveDataDirectory(): string {
   const envDir = process.env.DATA_DIR;
   if (envDir && fs.existsSync(envDir)) return envDir;
   if (fs.existsSync('/railway/data')) return '/railway/data';
-  if (fs.existsSync('/data') && !fs.existsSync('/data/usr')) return '/data';
   const localData = path.resolve(process.cwd(), 'data');
   if (!fs.existsSync(localData)) {
     try {
@@ -68,6 +67,7 @@ export interface BotRecord {
   lastRestartAt: string | null;
   autoRestart?: boolean;
   restartCount?: number;
+  category?: 'whatsapp_bot' | 'website' | 'web_service';
   createdAt: string;
   updatedAt: string;
 }
@@ -294,6 +294,9 @@ class DatabaseManager {
     this.cloudSyncTimer = setInterval(() => {
       cloudFirestoreSync.saveToFirestore(this.data).catch(() => {});
     }, 60 * 1000);
+    if (this.cloudSyncTimer.unref) {
+      this.cloudSyncTimer.unref();
+    }
   }
 
   /**

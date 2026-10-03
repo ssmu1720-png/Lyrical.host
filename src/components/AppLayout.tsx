@@ -45,8 +45,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 
   const userNavItems = [
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { path: '/bots', label: 'My Bots', icon: BotIcon },
-    { path: '/deploy', label: 'Deploy Bot', icon: Rocket },
+    { path: '/bots', label: 'Bots & Websites', icon: BotIcon },
+    { path: '/deploy', label: 'Deploy', icon: Rocket },
     { path: '/notifications', label: 'Notifications', icon: Bell, badge: unreadNotifications },
     { path: '/profile', label: 'Profile', icon: UserIcon },
     { path: '/settings', label: 'Settings', icon: Settings },
@@ -109,7 +109,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
                 : 'text-slate-400 hover:text-slate-100'
             }`}
           >
-            Bots
+            Bots & Sites
           </Link>
           <Link
             to="/deploy"

@@ -19,6 +19,10 @@ import {
   AlertTriangle,
   CheckCircle2,
   ArrowLeft,
+  Globe,
+  ExternalLink,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { apiRequest, Bot, Deployment, formatUptime, formatBytes } from '../lib/api';
 import { TerminalLogViewer } from '../components/TerminalLogViewer';
@@ -359,6 +363,19 @@ export const BotDetailPage: React.FC = () => {
 
         {/* Lifecycle Controls */}
         <div className="flex flex-wrap items-center gap-2">
+          {bot.status === 'running' && (
+            <a
+              href={`/live/${bot.id}/`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3.5 py-2 text-xs font-bold rounded-lg bg-cyan-500 text-slate-950 hover:bg-cyan-400 transition-colors flex items-center gap-1.5 shadow-sm"
+              title="Open Live Website in a new tab"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              Open Live Website
+            </a>
+          )}
+
           {bot.status !== 'running' ? (
             <button
               type="button"
@@ -416,6 +433,52 @@ export const BotDetailPage: React.FC = () => {
             <Trash2 className="w-3.5 h-3.5" />
             Delete
           </button>
+        </div>
+      </div>
+
+      {/* Live Website & Proxy Access Banner */}
+      <div className="p-4 rounded-xl border border-cyan-500/30 bg-cyan-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0">
+            <Globe className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-xs font-bold text-white flex items-center gap-2">
+              <span>Live Web Gateway & Public Preview</span>
+              <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 text-[10px] font-mono">
+                Port {bot.port || 8080}
+              </span>
+            </div>
+            <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
+              <span>Direct Link:</span>
+              <code className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-white font-mono text-[11px]">
+                {window.location.origin}/live/{bot.id}/
+              </code>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              navigator.clipboard.writeText(`${window.location.origin}/live/${bot.id}/`);
+              setNotice('Live URL copied to clipboard!');
+            }}
+            className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:text-white text-xs font-medium inline-flex items-center gap-1.5 transition-colors"
+          >
+            <Copy className="w-3.5 h-3.5" />
+            Copy Link
+          </button>
+          <a
+            href={`/live/${bot.id}/`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3.5 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold inline-flex items-center gap-1.5 transition-colors"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            Open Website
+          </a>
         </div>
       </div>
 

@@ -45,6 +45,8 @@ export interface Bot {
   lastRestartAt: string | null;
   autoRestart?: boolean;
   restartCount?: number;
+  category?: 'whatsapp_bot' | 'website' | 'web_service';
+  liveUrl?: string;
   createdAt: string;
   updatedAt: string;
   ownerEmail?: string;

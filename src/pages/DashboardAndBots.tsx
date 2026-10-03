@@ -10,6 +10,8 @@ import {
   Search,
   AlertTriangle,
   Cloud as FolderCloud,
+  Globe,
+  ExternalLink,
 } from 'lucide-react';
 import { apiRequest, Bot, Deployment, NotificationItem, formatUptime } from '../lib/api';
 import { GoogleDriveModal } from '../components/GoogleDriveModal';
@@ -225,6 +227,18 @@ export const DashboardPage: React.FC = () => {
                     </td>
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
+                        {bot.status === 'running' && (
+                          <a
+                            href={`/live/${bot.id}/`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-2 py-1 rounded-md bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 hover:bg-cyan-500/30 transition-colors whitespace-nowrap inline-flex items-center gap-1 font-medium"
+                            title="Open Live Website / Application"
+                          >
+                            <Globe className="w-3 h-3" />
+                            Live Site ↗
+                          </a>
+                        )}
                         <Link
                           to={`/bots/${bot.id}`}
                           className="px-2.5 py-1 rounded-md border border-slate-700 text-slate-200 hover:border-cyan-500/50 hover:text-cyan-300 transition-colors whitespace-nowrap"
@@ -387,9 +401,9 @@ export const BotsListPage: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-800">
         <div>
-          <h1 className="text-2xl font-bold">My WhatsApp Bots</h1>
+          <h1 className="text-2xl font-bold">My Deployments & Bots</h1>
           <p className="text-xs text-slate-400 mt-1">
-            Manage container processes, inspect real-time logs, and configure WhatsApp pairing
+            Manage container processes, live website proxies, inspect logs, and configure WhatsApp or Web runtimes
           </p>
         </div>
         <button
@@ -398,7 +412,7 @@ export const BotsListPage: React.FC = () => {
           className="px-4 py-2 text-xs font-semibold rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 hover:from-cyan-400 hover:to-blue-500 transition-all flex items-center gap-2 self-start sm:self-auto"
         >
           <Rocket className="w-4 h-4" />
-          Deploy New Bot
+          Deploy Bot / Website
         </button>
       </div>
 
@@ -537,6 +551,18 @@ export const BotsListPage: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {bot.status === 'running' && (
+                    <a
+                      href={`/live/${bot.id}/`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-cyan-500 text-slate-950 hover:bg-cyan-400 transition-colors inline-flex items-center gap-1 shadow-sm"
+                      title="Open Live Website / Preview"
+                    >
+                      <Globe className="w-3.5 h-3.5" />
+                      Live Site ↗
+                    </a>
+                  )}
                   <Link
                     to={`/bots/${bot.id}`}
                     className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/25"

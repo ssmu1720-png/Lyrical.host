@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { DatabaseSchema } from './db.ts';
+import type { DatabaseSchema } from './db.ts';
 
 interface FirebaseConfig {
   projectId: string;
@@ -31,6 +31,40 @@ try {
 }
 
 const FIRESTORE_BASE_URL = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId}/documents`;
+
+/**
+ * Compacts and safely sanitizes database state to ensure it stays well under the 1MB Firestore limit
+ */
+function prepareCloudPayload(data: DatabaseSchema): string {
+  try {
+    const sanitized: DatabaseSchema = {
+      users: data.users || [],
+      sessions: (data.sessions || []).slice(-50), // keep recent sessions
+      bots: data.bots || [],
+      envVars: data.envVars || [],
+      // Keep last 30 deployments, trimming logs to recent 50 lines to keep document compact
+      deployments: (data.deployments || []).slice(0, 30).map((d) => ({
+        ...d,
+        logs: Array.isArray(d.logs) ? d.logs.slice(-50) : [],
+      })),
+      servers: data.servers || [],
+      notifications: (data.notifications || []).slice(0, 50),
+      adminActions: (data.adminActions || []).slice(0, 50),
+      systemSettings: data.systemSettings,
+      emails: (data.emails || []).slice(0, 50),
+    };
+
+    let serialized = JSON.stringify(sanitized);
+    // Safety check: if somehow still over 800KB, trim further
+    if (serialized.length > 800 * 1024) {
+      sanitized.deployments = sanitized.deployments.slice(0, 10).map((d) => ({ ...d, logs: [] }));
+      serialized = JSON.stringify(sanitized);
+    }
+    return serialized;
+  } catch {
+    return JSON.stringify(data);
+  }
+}
 
 class CloudFirestoreSync {
   private lastSyncTime: string | null = null;
@@ -92,7 +126,7 @@ class CloudFirestoreSync {
 
     try {
       const now = new Date().toISOString();
-      const serialized = JSON.stringify(data);
+      const serialized = prepareCloudPayload(data);
 
       const body = {
         fields: {
@@ -136,7 +170,7 @@ class CloudFirestoreSync {
     try {
       const now = new Date().toISOString();
       const snapshotId = `snap_${Date.now()}`;
-      const serialized = JSON.stringify(data);
+      const serialized = prepareCloudPayload(data);
 
       const body = {
         fields: {
