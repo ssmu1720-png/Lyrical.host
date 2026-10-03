@@ -12,6 +12,7 @@ import {
 } from './pages/AuthPages';
 import { DashboardPage, BotsListPage } from './pages/DashboardAndBots';
 import { DeployWizardPage } from './pages/DeployWizardPage';
+import { GitImportPage } from './pages/GitImportPage';
 import { BotDetailPage } from './pages/BotDetailPage';
 import {
   NotificationsPage,
@@ -214,6 +215,8 @@ export default function App() {
                   <Route path="/bots/:id/logs" element={<BotDetailPage />} />
                   <Route path="/bots/:id/settings" element={<BotDetailPage />} />
                   <Route path="/deploy" element={<DeployWizardPage />} />
+                  <Route path="/import-git" element={<GitImportPage />} />
+                  <Route path="/github" element={<GitImportPage />} />
                   <Route
                     path="/notifications"
                     element={

@@ -53,6 +53,9 @@ function sanitizeUser(user: UserRecord) {
     emailVerified: user.emailVerified,
     createdAt: user.createdAt,
     lastLoginAt: user.lastLoginAt,
+    githubConnected: !!user.githubToken,
+    githubUsername: user.githubUsername || null,
+    githubAvatarUrl: user.githubAvatarUrl || null,
   };
 }
 
@@ -661,6 +664,356 @@ async function startServer() {
     user.salt = creds.salt;
     db.save();
     res.json({ ok: true, message: 'Password updated successfully.' });
+  });
+
+  // --- GITHUB OAUTH & INTEGRATION ROUTES (OAuth Integration Skill) ---
+  app.get('/api/auth/github/url', (req, res) => {
+    try {
+      const clientId =
+        process.env.GITHUB_CLIENT_ID ||
+        process.env.CLIENT_ID ||
+        db.state.systemSettings.githubClientId ||
+        '';
+      const origin = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+      const redirectUri = `${origin}/auth/github/callback`;
+
+      if (!clientId) {
+        return res.json({
+          configured: false,
+          url: null,
+          redirectUri,
+          message:
+            'GitHub OAuth app credentials are not configured yet. You can connect your GitHub account instantly with a Personal Access Token (PAT), or set CLIENT_ID and CLIENT_SECRET.',
+        });
+      }
+
+      const state = crypto.randomBytes(16).toString('hex');
+      const params = new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        scope: 'repo,read:user,user:email',
+        state,
+      });
+
+      const authUrl = `https://github.com/login/oauth/authorize?${params.toString()}`;
+      res.json({
+        configured: true,
+        url: authUrl,
+        redirectUri,
+        clientId,
+      });
+    } catch {
+      res.status(500).json({ error: 'Failed to construct GitHub authorization URL.' });
+    }
+  });
+
+  // Callback handler with postMessage as mandated by oauth-integration skill
+  const githubCallbackHandler = async (req: Request, res: Response) => {
+    const { code, error, error_description } = req.query;
+
+    if (error || !code) {
+      const errText = error_description || error || 'GitHub authentication was cancelled or rejected.';
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head><title>GitHub Connection - LYRICAL</title></head>
+        <body style="background:#090d16;color:#f87171;font-family:system-ui,-apple-system,sans-serif;padding:32px;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
+          <div style="background:#0d1526;border:1px solid #7f1d1d;padding:28px;border-radius:12px;max-width:440px;text-align:center;">
+            <h3 style="margin:0 0 12px;color:#f87171;">GitHub Connection Error</h3>
+            <p style="margin:0 0 16px;color:#cbd5e1;font-size:14px;">${String(errText)}</p>
+            <button onclick="window.close()" style="background:#2563eb;color:#fff;border:none;padding:8px 18px;border-radius:6px;cursor:pointer;">Close Window</button>
+          </div>
+          <script>setTimeout(() => { if (window.opener) window.close(); }, 4000);</script>
+        </body>
+        </html>
+      `);
+    }
+
+    try {
+      const clientId =
+        process.env.GITHUB_CLIENT_ID ||
+        process.env.CLIENT_ID ||
+        db.state.systemSettings.githubClientId ||
+        '';
+      const clientSecret =
+        process.env.GITHUB_CLIENT_SECRET ||
+        process.env.CLIENT_SECRET ||
+        db.state.systemSettings.githubClientSecret ||
+        '';
+
+      if (!clientId || !clientSecret) {
+        return res.send(`
+          <!DOCTYPE html>
+          <html>
+          <body style="background:#090d16;color:#f87171;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
+            <div style="background:#0d1526;border:1px solid #1e293b;padding:24px;border-radius:12px;max-width:440px;text-align:center;">
+              <h3 style="color:#ef4444;margin:0 0 8px;">Missing GitHub Client Secret</h3>
+              <p style="color:#94a3b8;font-size:13px;line-height:1.5;">Please set CLIENT_SECRET or GITHUB_CLIENT_SECRET in environment variables or Admin Settings.</p>
+              <button onclick="window.close()" style="margin-top:12px;background:#2563eb;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;">Close</button>
+            </div>
+          </body>
+          </html>
+        `);
+      }
+
+      // Exchange code for token directly with GitHub
+      const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'User-Agent': 'LYRICAL-Cloud-Platform',
+        },
+        body: JSON.stringify({
+          client_id: clientId,
+          client_secret: clientSecret,
+          code,
+        }),
+      });
+
+      const tokenData = await tokenRes.json();
+      if (!tokenData.access_token) {
+        throw new Error(tokenData.error_description || tokenData.error || 'Failed to obtain access token from GitHub.');
+      }
+
+      const accessToken = tokenData.access_token;
+
+      // Fetch user profile from GitHub
+      let ghUser: any = { login: 'github-user' };
+      try {
+        const userRes = await fetch('https://api.github.com/user', {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: 'application/vnd.github+json',
+            'User-Agent': 'LYRICAL-Cloud-Platform',
+          },
+        });
+        if (userRes.ok) {
+          ghUser = await userRes.json();
+        }
+      } catch {}
+
+      // Return popup callback response with postMessage
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head><title>GitHub Connected - LYRICAL</title></head>
+        <body style="background:#070b14;color:#f8fafc;font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
+          <div style="background:#0d1526;border:1px solid #0284c7;padding:32px;border-radius:16px;text-align:center;max-width:380px;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+            <div style="width:48px;height:48px;background:rgba(2,132,199,0.15);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;color:#38bdf8;font-size:24px;">✓</div>
+            <h3 style="margin:0 0 8px;font-size:18px;font-weight:700;color:#ffffff;">GitHub Connected!</h3>
+            <p style="margin:0 0 16px;font-size:13px;color:#94a3b8;">Connected as <strong style="color:#38bdf8;">@${ghUser.login || 'GitHub User'}</strong>. Returning to LYRICAL...</p>
+          </div>
+          <script>
+            try {
+              if (window.opener) {
+                window.opener.postMessage({
+                  type: 'OAUTH_AUTH_SUCCESS',
+                  provider: 'github',
+                  token: ${JSON.stringify(accessToken)},
+                  user: ${JSON.stringify({
+                    login: ghUser.login,
+                    avatar_url: ghUser.avatar_url,
+                    name: ghUser.name,
+                    html_url: ghUser.html_url,
+                    public_repos: ghUser.public_repos,
+                  })}
+                }, '*');
+                window.close();
+              } else {
+                window.location.href = '/deploy';
+              }
+            } catch (err) {
+              window.location.href = '/deploy';
+            }
+          </script>
+        </body>
+        </html>
+      `);
+    } catch (err: any) {
+      res.status(500).send(`
+        <!DOCTYPE html>
+        <html>
+        <body style="background:#090d16;color:#f87171;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
+          <div style="background:#0d1526;border:1px solid #ef4444;padding:24px;border-radius:12px;text-align:center;max-width:420px;">
+            <h3 style="margin:0 0 8px;">OAuth Exchange Failed</h3>
+            <p style="color:#cbd5e1;font-size:13px;">${err.message || 'An error occurred while exchanging the GitHub authorization code.'}</p>
+            <button onclick="window.close()" style="margin-top:12px;background:#2563eb;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;">Close</button>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+  };
+
+  // Support both with and without trailing slash per OAuth Integration skill
+  app.get('/auth/github/callback', githubCallbackHandler);
+  app.get('/auth/github/callback/', githubCallbackHandler);
+  // Also register general /auth/callback aliases
+  app.get('/auth/callback', githubCallbackHandler);
+  app.get('/auth/callback/', githubCallbackHandler);
+
+  // Status of GitHub connection for logged in user
+  app.get('/api/github/status', requireAuth, (req: AuthenticatedRequest, res) => {
+    const user = req.user!;
+    const clientId =
+      process.env.GITHUB_CLIENT_ID ||
+      process.env.CLIENT_ID ||
+      db.state.systemSettings.githubClientId ||
+      '';
+    const origin = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+
+    res.json({
+      connected: !!user.githubToken,
+      oauthConfigured: !!clientId,
+      callbackUrl: `${origin}/auth/github/callback`,
+      user: user.githubToken
+        ? {
+            login: user.githubUsername || 'github-user',
+            avatar_url: user.githubAvatarUrl || null,
+          }
+        : null,
+    });
+  });
+
+  // Connect or update GitHub via Token (PAT or OAuth token)
+  app.post('/api/github/connect-token', requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { token } = req.body;
+      if (!token || typeof token !== 'string' || !token.trim()) {
+        return res.status(400).json({ error: 'GitHub Personal Access Token or OAuth token is required.' });
+      }
+      const cleanToken = token.trim();
+      const ghRes = await fetch('https://api.github.com/user', {
+        headers: {
+          Authorization: `Bearer ${cleanToken}`,
+          Accept: 'application/vnd.github+json',
+          'User-Agent': 'LYRICAL-Cloud-Platform',
+        },
+      });
+
+      if (!ghRes.ok) {
+        if (ghRes.status === 401) {
+          return res.status(401).json({
+            error: 'Invalid GitHub token. Please verify your token has "repo" and "read:user" permissions.',
+          });
+        }
+        return res.status(ghRes.status).json({
+          error: `GitHub rejected connection: ${ghRes.statusText}`,
+        });
+      }
+
+      const ghUser = await ghRes.json();
+      req.user!.githubToken = cleanToken;
+      req.user!.githubUsername = ghUser.login;
+      req.user!.githubAvatarUrl = ghUser.avatar_url;
+      db.save();
+
+      db.addNotification(
+        req.user!.id,
+        'announcement',
+        'GitHub Connected',
+        `GitHub account @${ghUser.login} connected. You can now import public and private repositories directly into LYRICAL.`
+      );
+
+      res.json({
+        ok: true,
+        user: {
+          login: ghUser.login,
+          avatar_url: ghUser.avatar_url,
+          name: ghUser.name,
+          public_repos: ghUser.public_repos,
+          total_private_repos: ghUser.total_private_repos,
+          html_url: ghUser.html_url,
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to connect GitHub account.' });
+    }
+  });
+
+  // Save session token from OAuth popup
+  app.post('/api/github/save-session-token', requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const { token, user } = req.body;
+      if (!token) {
+        return res.status(400).json({ error: 'Access token required.' });
+      }
+      req.user!.githubToken = String(token).trim();
+      if (user?.login) req.user!.githubUsername = String(user.login).trim();
+      if (user?.avatar_url) req.user!.githubAvatarUrl = String(user.avatar_url).trim();
+      db.save();
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ error: 'Failed to save GitHub session.' });
+    }
+  });
+
+  // Disconnect GitHub account
+  app.post('/api/github/disconnect', requireAuth, (req: AuthenticatedRequest, res) => {
+    req.user!.githubToken = undefined;
+    req.user!.githubUsername = undefined;
+    req.user!.githubAvatarUrl = undefined;
+    db.save();
+    res.json({ ok: true, message: 'GitHub account disconnected.' });
+  });
+
+  // List user repositories
+  app.get('/api/github/repos', requireAuth, async (req: AuthenticatedRequest, res) => {
+    try {
+      const token = req.user!.githubToken || (req.headers['x-github-token'] as string);
+      if (!token) {
+        return res.status(401).json({
+          error: 'NEEDS_GITHUB_AUTH',
+          message: 'No GitHub account or token connected. Please connect your GitHub account.',
+        });
+      }
+
+      const ghRes = await fetch(
+        'https://api.github.com/user/repos?sort=updated&per_page=100&affiliation=owner,collaborator',
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/vnd.github+json',
+            'User-Agent': 'LYRICAL-Cloud-Platform',
+          },
+        }
+      );
+
+      if (!ghRes.ok) {
+        if (ghRes.status === 401 || ghRes.status === 403) {
+          req.user!.githubToken = undefined;
+          db.save();
+          return res.status(ghRes.status).json({
+            error: 'NEEDS_GITHUB_AUTH',
+            message: 'GitHub access token expired or revoked. Please reconnect your account.',
+          });
+        }
+        return res.status(ghRes.status).json({
+          error: `GitHub API error: ${ghRes.statusText}`,
+        });
+      }
+
+      const repos = await ghRes.json();
+      const mapped = repos.map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        full_name: r.full_name,
+        private: !!r.private,
+        description: r.description,
+        clone_url: r.clone_url,
+        html_url: r.html_url,
+        default_branch: r.default_branch || 'main',
+        language: r.language || null,
+        stargazers_count: r.stargazers_count || 0,
+        updated_at: r.updated_at,
+        fork: !!r.fork,
+      }));
+
+      res.json({ repos: mapped });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to list GitHub repositories.' });
+    }
   });
 
   // --- USER DASHBOARD & BOTS ---

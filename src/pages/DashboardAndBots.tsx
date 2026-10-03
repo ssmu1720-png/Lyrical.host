@@ -12,6 +12,7 @@ import {
   Cloud as FolderCloud,
   Globe,
   ExternalLink,
+  GitBranch,
 } from 'lucide-react';
 import { apiRequest, Bot, Deployment, NotificationItem, formatUptime } from '../lib/api';
 import { GoogleDriveModal } from '../components/GoogleDriveModal';
@@ -74,6 +75,15 @@ export const DashboardPage: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => navigate('/import-git')}
+            className="px-4 py-2.5 text-xs font-semibold rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 transition-colors flex items-center gap-2 whitespace-nowrap"
+          >
+            <GitBranch className="w-4 h-4 text-cyan-400" />
+            Import from Git
+          </button>
+
           <button
             type="button"
             onClick={() => setDriveOpen(true)}

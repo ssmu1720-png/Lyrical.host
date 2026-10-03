@@ -30,6 +30,9 @@ export interface UserRecord {
   emailVerified: boolean;
   createdAt: string;
   lastLoginAt: string | null;
+  githubToken?: string;
+  githubUsername?: string;
+  githubAvatarUrl?: string;
 }
 
 export interface SessionRecord {
@@ -162,6 +165,8 @@ export interface SystemSettingsRecord {
   smtpFrom?: string;
   platformDomain?: string;
   requireSignupOtp?: boolean;
+  githubClientId?: string;
+  githubClientSecret?: string;
 }
 
 export interface DatabaseSchema {

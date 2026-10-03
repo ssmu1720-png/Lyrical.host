@@ -17,6 +17,11 @@ import {
   RefreshCw,
   Cloud as FolderCloud,
   Globe,
+  Star,
+  LogOut,
+  Code,
+  Sparkles,
+  Layers,
 } from 'lucide-react';
 import { apiRequest, Bot, Deployment } from '../lib/api';
 import {
@@ -25,11 +30,14 @@ import {
   listUserGithubRepos,
   getGithubAccessToken,
   getConnectedGithubUser,
+  checkGithubStatus,
+  disconnectGithub,
   GithubRepoItem,
 } from '../lib/workspaceAuth';
 import { BOT_CATALOG, WEBSITE_CATALOG, CatalogBotItem } from '../lib/botCatalog';
 import { TerminalLogViewer } from '../components/TerminalLogViewer';
 import { GoogleDriveModal } from '../components/GoogleDriveModal';
+import { GithubConnectModal } from '../components/GithubConnectModal';
 
 export const DeployWizardPage: React.FC = () => {
   const navigate = useNavigate();
@@ -67,6 +75,13 @@ export const DeployWizardPage: React.FC = () => {
   const [githubError, setGithubError] = useState<string | null>(null);
   const [repoSearch, setRepoSearch] = useState('');
   const [showGithubPicker, setShowGithubPicker] = useState(false);
+  const [connectModalOpen, setConnectModalOpen] = useState(false);
+  const [selectedLangFilter, setSelectedLangFilter] = useState('ALL');
+  const [importedBanner, setImportedBanner] = useState<{
+    repoName: string;
+    branch: string;
+    isPrivate: boolean;
+  } | null>(null);
 
   // Advanced / Google Drive source files
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -81,10 +96,35 @@ export const DeployWizardPage: React.FC = () => {
   const [deployedBot, setDeployedBot] = useState<Bot | null>(null);
   const [activeDeployment, setActiveDeployment] = useState<Deployment | null>(null);
 
+  // Initial mount: load connected GitHub status & repos
+  useEffect(() => {
+    checkGithubStatus().then(async (status) => {
+      if (status.connected && status.user) {
+        setGithubConnectedUser(status.user);
+        try {
+          const repos = await listUserGithubRepos();
+          setGithubRepos(repos);
+        } catch {}
+      }
+    });
+
+    if (searchParams.get('connect') === 'github') {
+      setShowGithubPicker(true);
+    }
+  }, []);
+
   const handleCustomRepoUrlChange = (url: string) => {
     setCustomRepoUrl(url);
-    const isCustom = !selectedBot || selectedBot.id === 'custom-github-bot' || selectedBot.id === 'custom-git-website';
-    if (isCustom && (!botInstanceName || botInstanceName === 'Custom GitHub Bot' || botInstanceName === 'Custom Git Repository Website')) {
+    const isCustom =
+      !selectedBot ||
+      selectedBot.id === 'custom-github-bot' ||
+      selectedBot.id === 'custom-git-website';
+    if (
+      isCustom &&
+      (!botInstanceName ||
+        botInstanceName === 'Custom GitHub Bot' ||
+        botInstanceName === 'Custom Git Repository Website')
+    ) {
       const match = url.trim().match(/\/([^/]+?)(?:\.git|\/)?$/);
       if (match && match[1]) {
         const cleanName = match[1]
@@ -98,7 +138,11 @@ export const DeployWizardPage: React.FC = () => {
   useEffect(() => {
     if (selectedBot) {
       if (selectedBot.id === 'custom-github-bot' || selectedBot.id === 'custom-git-website') {
-        if (!botInstanceName || botInstanceName === 'Custom GitHub Bot' || botInstanceName === 'Custom Git Repository Website') {
+        if (
+          !botInstanceName ||
+          botInstanceName === 'Custom GitHub Bot' ||
+          botInstanceName === 'Custom Git Repository Website'
+        ) {
           setBotInstanceName('');
         }
       } else {
@@ -108,7 +152,10 @@ export const DeployWizardPage: React.FC = () => {
         setCustomRepoUrl(selectedBot.repoUrl);
       }
       setBranch(selectedBot.branch || 'main');
-      setStartCommand(selectedBot.startCommand || (selectedBot.category === 'website' ? 'node server.js' : 'npm start'));
+      setStartCommand(
+        selectedBot.startCommand ||
+          (selectedBot.category === 'website' ? 'node server.js' : 'npm start')
+      );
       setBuildCommand(selectedBot.buildCommand || 'npm install');
     }
   }, [selectedBot]);
@@ -141,10 +188,8 @@ export const DeployWizardPage: React.FC = () => {
       setGithubRepos(repos);
       setShowGithubPicker(true);
     } catch (err: any) {
-      if (err?.code === 'auth/operation-not-allowed') {
-        setGithubError(
-          'To connect GitHub via Firebase Auth: enable the GitHub provider in Firebase Console → Authentication → Sign-in method → GitHub.'
-        );
+      if (err?.code === 'OAUTH_NOT_CONFIGURED') {
+        setConnectModalOpen(true);
       } else {
         setGithubError(err.message || 'Could not connect GitHub repositories.');
       }
@@ -154,8 +199,8 @@ export const DeployWizardPage: React.FC = () => {
   };
 
   const handleRefreshGithubRepos = async () => {
-    if (!getGithubAccessToken()) {
-      await handleConnectGithub();
+    if (!githubConnectedUser && !getGithubAccessToken()) {
+      setConnectModalOpen(true);
       return;
     }
     setGithubLoading(true);
@@ -165,16 +210,43 @@ export const DeployWizardPage: React.FC = () => {
       setGithubRepos(repos);
       setShowGithubPicker(true);
     } catch {
-      await handleConnectGithub();
+      setConnectModalOpen(true);
     } finally {
       setGithubLoading(false);
     }
   };
 
-  const handleSelectGithubRepo = (repo: GithubRepoItem) => {
-    const customBotTemplate =
-      BOT_CATALOG.find((b) => b.id === 'custom-github-bot') || BOT_CATALOG[0];
-    if (!selectedBot) {
+  const handleSelectGithubRepo = (
+    repo: GithubRepoItem,
+    targetCategory: 'bot' | 'website' = 'bot'
+  ) => {
+    const isWeb =
+      targetCategory === 'website' ||
+      (!repo.name.toLowerCase().includes('bot') &&
+        (repo.language === 'HTML' ||
+          repo.language === 'CSS' ||
+          repo.language === 'Vue' ||
+          repo.language === 'PHP'));
+
+    if (isWeb) {
+      const customWebsiteTemplate =
+        WEBSITE_CATALOG.find((w) => w.id === 'custom-git-website') || WEBSITE_CATALOG[0];
+      setSelectedBot({
+        ...customWebsiteTemplate,
+        name: repo.name,
+        author: repo.full_name.split('/')[0] || 'GitHub',
+        description: repo.description || `Website deployed from GitHub repository ${repo.full_name}`,
+        repoUrl: repo.clone_url.replace(/\.git$/, ''),
+        branch: repo.default_branch || 'main',
+        startCommand: repo.language === 'Python' ? 'python app.py' : 'node server.js',
+        buildCommand:
+          repo.language === 'Python' ? 'pip install -r requirements.txt' : 'npm install',
+      });
+      setSearchParams({ bot: 'custom-git-website' });
+      setActiveCatalogTab('websites');
+    } else {
+      const customBotTemplate =
+        BOT_CATALOG.find((b) => b.id === 'custom-github-bot') || BOT_CATALOG[0];
       setSelectedBot({
         ...customBotTemplate,
         name: repo.name,
@@ -182,14 +254,30 @@ export const DeployWizardPage: React.FC = () => {
         description: repo.description || `Deployed from GitHub repository ${repo.full_name}`,
         repoUrl: repo.clone_url.replace(/\.git$/, ''),
         branch: repo.default_branch || 'main',
+        startCommand: 'npm start',
+        buildCommand: 'npm install',
       });
       setSearchParams({ bot: 'custom-github-bot' });
+      setActiveCatalogTab('bots');
     }
+
     setBotInstanceName(repo.name);
     setCustomRepoUrl(repo.clone_url.replace(/\.git$/, ''));
     setBranch(repo.default_branch || 'main');
+    setImportedBanner({
+      repoName: repo.full_name,
+      branch: repo.default_branch || 'main',
+      isPrivate: repo.private,
+    });
     setShowGithubPicker(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDisconnect = async () => {
+    await disconnectGithub();
+    setGithubConnectedUser(null);
+    setGithubRepos([]);
+    setShowGithubPicker(false);
   };
 
   const handleSelectBot = (bot: CatalogBotItem) => {
@@ -406,23 +494,60 @@ export const DeployWizardPage: React.FC = () => {
             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#0d1526] border border-slate-800 text-xs font-medium text-slate-300 hover:text-white transition-colors"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
-            Back to Bot Selection
+            Back to Selection
           </button>
 
-          <button
-            type="button"
-            onClick={handleRefreshGithubRepos}
-            disabled={githubLoading}
-            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-[#24292F] hover:bg-[#2c3239] border border-slate-700 text-xs font-semibold text-white transition-colors"
-          >
-            <GitBranch className="w-3.5 h-3.5 text-cyan-400" />
-            {githubConnectedUser
-              ? `GitHub: @${githubConnectedUser.login} (Browse Repos)`
-              : githubLoading
-              ? 'Connecting GitHub...'
-              : 'Connect GitHub Repo'}
-          </button>
+          <div className="flex items-center gap-2">
+            {githubConnectedUser && (
+              <button
+                type="button"
+                onClick={handleDisconnect}
+                className="p-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-rose-400 text-xs transition-colors"
+                title="Disconnect GitHub Account"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handleRefreshGithubRepos}
+              disabled={githubLoading}
+              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-[#24292F] hover:bg-[#2c3239] border border-slate-700 text-xs font-semibold text-white transition-colors"
+            >
+              <GitBranch className="w-3.5 h-3.5 text-cyan-400" />
+              {githubConnectedUser
+                ? `GitHub: @${githubConnectedUser.login} (${githubRepos.length} Repos)`
+                : githubLoading
+                ? 'Connecting GitHub...'
+                : 'Connect GitHub'}
+            </button>
+          </div>
         </div>
+
+        {/* Imported Repository Status Banner */}
+        {importedBanner && (
+          <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-950/70 to-slate-900 border border-emerald-500/40 text-xs text-emerald-300 flex items-center justify-between gap-3 shadow-sm animate-in fade-in">
+            <div className="flex items-center gap-2 min-w-0">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="truncate">
+                Imported from GitHub: <strong className="text-white font-mono">{importedBanner.repoName}</strong> (Branch: {importedBanner.branch})
+                {importedBanner.isPrivate && (
+                  <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono">
+                    Private
+                  </span>
+                )}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setImportedBanner(null)}
+              className="text-[11px] text-slate-400 hover:text-white px-2 py-0.5 rounded border border-slate-800 shrink-0"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {githubError && (
           <div className="p-3.5 rounded-xl bg-amber-950/60 border border-amber-500/40 text-xs text-amber-200 flex items-center gap-2.5">
@@ -437,15 +562,25 @@ export const DeployWizardPage: React.FC = () => {
             <div className="flex items-center justify-between">
               <div className="text-xs font-bold text-white flex items-center gap-2">
                 <GitBranch className="w-4 h-4 text-cyan-400" />
-                Select a GitHub Repository ({githubRepos.length} available)
+                Select a GitHub Repository to Import ({githubRepos.length} available)
               </div>
-              <button
-                type="button"
-                onClick={() => setShowGithubPicker(false)}
-                className="text-xs text-slate-400 hover:text-white"
-              >
-                Close
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRefreshGithubRepos}
+                  className="p-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-white text-xs"
+                  title="Refresh Repositories"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${githubLoading ? 'animate-spin' : ''}`} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowGithubPicker(false)}
+                  className="text-xs text-slate-400 hover:text-white px-2 py-0.5 rounded border border-slate-800"
+                >
+                  Close
+                </button>
+              </div>
             </div>
 
             <div className="relative">
@@ -454,21 +589,39 @@ export const DeployWizardPage: React.FC = () => {
                 type="text"
                 value={repoSearch}
                 onChange={(e) => setRepoSearch(e.target.value)}
-                placeholder="Filter your GitHub repositories..."
+                placeholder="Filter repositories by name or description..."
                 className="w-full pl-8 pr-3 py-2 text-xs bg-[#070b14] border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
               />
             </div>
 
-            <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/80 border border-slate-800 rounded-lg">
+            {/* Language Filter Chips */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px]">
+              {['ALL', 'TypeScript', 'JavaScript', 'Python', 'Other'].map((lang) => (
+                <button
+                  key={lang}
+                  type="button"
+                  onClick={() => setSelectedLangFilter(lang)}
+                  className={`px-2.5 py-0.5 rounded-full transition-colors whitespace-nowrap ${
+                    selectedLangFilter === lang
+                      ? 'bg-cyan-500 text-slate-950 font-bold'
+                      : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {lang}
+                </button>
+              ))}
+            </div>
+
+            <div className="max-h-64 overflow-y-auto divide-y divide-slate-800/80 border border-slate-800 rounded-lg">
               {filteredGithubRepos.length === 0 ? (
                 <div className="p-4 text-center text-xs text-slate-500">
-                  No matching repositories found in your GitHub account.
+                  No matching repositories found.
                 </div>
               ) : (
                 filteredGithubRepos.map((repo) => (
                   <div
                     key={repo.id}
-                    className="p-3 flex items-center justify-between gap-3 hover:bg-slate-900/70 transition-colors"
+                    className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-900/70 transition-colors"
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
@@ -480,18 +633,35 @@ export const DeployWizardPage: React.FC = () => {
                             <Lock className="w-2.5 h-2.5" /> Private
                           </span>
                         )}
+                        {repo.language && (
+                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px]">
+                            {repo.language}
+                          </span>
+                        )}
                       </div>
                       <div className="text-[11px] text-slate-400 truncate mt-0.5">
-                        Branch: {repo.default_branch} · {repo.description || 'No description'}
+                        Branch: {repo.default_branch} · {repo.description || 'No description provided'}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleSelectGithubRepo(repo)}
-                      className="px-3 py-1.5 rounded-lg bg-cyan-500 text-slate-950 text-xs font-semibold hover:bg-cyan-400 shrink-0"
-                    >
-                      Use Repo
-                    </button>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectGithubRepo(repo, 'bot')}
+                        className="px-2.5 py-1 rounded-lg bg-blue-600/90 hover:bg-blue-600 text-white text-[11px] font-semibold"
+                        title="Import as WhatsApp Bot"
+                      >
+                        Deploy Bot
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectGithubRepo(repo, 'website')}
+                        className="px-2.5 py-1 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-[11px] font-bold"
+                        title="Import as Website or Web App"
+                      >
+                        Deploy Website
+                      </button>
+                    </div>
                   </div>
                 ))
               )}
@@ -928,19 +1098,50 @@ export const DeployWizardPage: React.FC = () => {
 
         {/* GitHub OAuth Connect Bar & Custom Repo Action */}
         <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
-          <button
-            type="button"
-            onClick={handleRefreshGithubRepos}
-            disabled={githubLoading}
-            className="px-4 py-2 rounded-xl bg-[#24292F] hover:bg-[#2c3239] border border-slate-700 text-xs font-semibold text-white inline-flex items-center gap-2 transition-colors"
-          >
-            <GitBranch className="w-4 h-4 text-cyan-400" />
-            {githubConnectedUser
-              ? `Connected to GitHub (@${githubConnectedUser.login}) — Browse My Repositories`
-              : githubLoading
-              ? 'Connecting to GitHub via Firebase...'
-              : 'Connect GitHub Account to Deploy Your Repositories'}
-          </button>
+          {githubConnectedUser ? (
+            <div className="inline-flex items-center gap-2 p-1.5 pl-3 rounded-xl bg-[#070b14] border border-cyan-500/40 text-xs">
+              {githubConnectedUser.avatar_url ? (
+                <img
+                  src={githubConnectedUser.avatar_url}
+                  alt={githubConnectedUser.login}
+                  className="w-6 h-6 rounded-full border border-slate-700"
+                />
+              ) : (
+                <GitBranch className="w-4 h-4 text-cyan-400" />
+              )}
+              <span className="font-semibold text-white">@{githubConnectedUser.login}</span>
+              <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-mono">
+                {githubRepos.length} Repos
+              </span>
+
+              <button
+                type="button"
+                onClick={() => setShowGithubPicker(!showGithubPicker)}
+                className="ml-1 px-3 py-1.5 rounded-lg bg-cyan-500 text-slate-950 font-bold hover:bg-cyan-400 text-xs transition-colors"
+              >
+                {showGithubPicker ? 'Close Browser' : 'Browse & Import Repos'}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDisconnect}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 text-xs"
+                title="Disconnect GitHub"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConnectModalOpen(true)}
+              disabled={githubLoading}
+              className="px-4 py-2.5 rounded-xl bg-[#24292F] hover:bg-[#2c3239] border border-slate-700 text-xs font-semibold text-white inline-flex items-center gap-2 shadow-md hover:border-cyan-500/50 transition-all"
+            >
+              <GitBranch className="w-4 h-4 text-cyan-400" />
+              <span>Connect GitHub Account to Import Projects</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -967,7 +1168,7 @@ export const DeployWizardPage: React.FC = () => {
               setSearchParams({ bot: 'custom-git-website' });
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className="px-4 py-2 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-xs font-semibold text-cyan-300 inline-flex items-center gap-2 transition-colors"
+            className="px-4 py-2.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-xs font-semibold text-cyan-300 inline-flex items-center gap-2 transition-colors"
           >
             <Globe className="w-4 h-4 text-cyan-400" />
             <span>Deploy Custom Git URL (Name It Yourself)</span>
@@ -984,15 +1185,20 @@ export const DeployWizardPage: React.FC = () => {
 
       {/* Connected GitHub Repositories Browser Drawer */}
       {showGithubPicker && (
-        <div className="p-5 rounded-2xl bg-[#0d1526] border border-cyan-500/40 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="p-5 rounded-2xl bg-[#0d1526] border border-cyan-500/40 space-y-4 shadow-xl animate-in fade-in duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
             <div>
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <GitBranch className="w-4 h-4 text-cyan-400" />
-                Your Connected GitHub Repositories ({githubRepos.length})
+                <span>Your GitHub Repositories ({githubRepos.length})</span>
+                {githubConnectedUser && (
+                  <span className="text-xs text-slate-400 font-normal">
+                    (@{githubConnectedUser.login})
+                  </span>
+                )}
               </h3>
-              <p className="text-xs text-slate-400">
-                Select any repository below to configure and deploy it directly to a LYRICAL container
+              <p className="text-xs text-slate-400 mt-0.5">
+                Click <strong>Deploy Bot</strong> or <strong>Deploy Website</strong> on any repository to import and name your custom project.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -1009,50 +1215,108 @@ export const DeployWizardPage: React.FC = () => {
                 onClick={() => setShowGithubPicker(false)}
                 className="px-3 py-1.5 rounded-lg border border-slate-800 text-xs text-slate-400 hover:text-white"
               >
-                Hide
+                Close
               </button>
             </div>
           </div>
 
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={repoSearch}
-              onChange={(e) => setRepoSearch(e.target.value)}
-              placeholder="Search your repositories by name or description..."
-              className="w-full pl-9 pr-4 py-2 text-xs bg-[#070b14] border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-            />
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={repoSearch}
+                onChange={(e) => setRepoSearch(e.target.value)}
+                placeholder="Search your repositories by name, language, or description..."
+                className="w-full pl-9 pr-4 py-2 text-xs bg-[#070b14] border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+              />
+            </div>
+
+            {/* Language filter tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+              {['ALL', 'TypeScript', 'JavaScript', 'Python', 'Other'].map((lang) => (
+                <button
+                  key={lang}
+                  type="button"
+                  onClick={() => setSelectedLangFilter(lang)}
+                  className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap text-xs ${
+                    selectedLangFilter === lang
+                      ? 'bg-cyan-500 text-slate-950 font-bold'
+                      : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {lang}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-72 overflow-y-auto pr-1">
-            {filteredGithubRepos.map((repo) => (
-              <div
-                key={repo.id}
-                className="p-3.5 rounded-xl bg-[#070b14] border border-slate-800 hover:border-cyan-500/40 flex items-center justify-between gap-3 transition-colors"
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-white truncate">{repo.full_name}</span>
-                    {repo.private && (
-                      <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 text-[10px] font-mono">
-                        Private
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-80 overflow-y-auto pr-1">
+            {filteredGithubRepos.length === 0 ? (
+              <div className="col-span-full p-8 text-center text-xs text-slate-400 bg-[#070b14] rounded-xl border border-slate-800">
+                <GitBranch className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                <p>No repositories match your current search.</p>
+              </div>
+            ) : (
+              filteredGithubRepos.map((repo) => (
+                <div
+                  key={repo.id}
+                  className="p-3.5 rounded-xl bg-[#070b14] border border-slate-800 hover:border-cyan-500/40 flex flex-col justify-between gap-3 transition-colors group"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-white truncate font-mono">
+                        {repo.full_name}
                       </span>
-                    )}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {repo.private ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 text-[10px] font-mono">
+                            <Lock className="w-2.5 h-2.5" /> Private
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px] font-mono">
+                            Public
+                          </span>
+                        )}
+                        {repo.language && (
+                          <span className="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 text-[10px] font-mono">
+                            {repo.language}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="text-[11px] text-slate-400 line-clamp-2 mt-1 leading-relaxed">
+                      {repo.description || 'GitHub project repository'}
+                    </div>
+
+                    <div className="flex items-center gap-3 text-[10px] font-mono text-slate-500 mt-2">
+                      <span>Branch: {repo.default_branch}</span>
+                      <span>·</span>
+                      <span>★ {repo.stargazers_count || 0}</span>
+                    </div>
                   </div>
-                  <div className="text-[11px] text-slate-400 truncate mt-0.5">
-                    {repo.description || 'WhatsApp Bot Repository'} · Branch: {repo.default_branch}
+
+                  <div className="flex items-center gap-2 pt-2 border-t border-slate-800/80">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectGithubRepo(repo, 'bot')}
+                      className="flex-1 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <span>Deploy Bot</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectGithubRepo(repo, 'website')}
+                      className="flex-1 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <Globe className="w-3 h-3" />
+                      <span>Deploy Website</span>
+                    </button>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handleSelectGithubRepo(repo)}
-                  className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shrink-0"
-                >
-                  Deploy Repo
-                </button>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       )}
