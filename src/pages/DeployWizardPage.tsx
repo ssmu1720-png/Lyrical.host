@@ -81,14 +81,34 @@ export const DeployWizardPage: React.FC = () => {
   const [deployedBot, setDeployedBot] = useState<Bot | null>(null);
   const [activeDeployment, setActiveDeployment] = useState<Deployment | null>(null);
 
+  const handleCustomRepoUrlChange = (url: string) => {
+    setCustomRepoUrl(url);
+    const isCustom = !selectedBot || selectedBot.id === 'custom-github-bot' || selectedBot.id === 'custom-git-website';
+    if (isCustom && (!botInstanceName || botInstanceName === 'Custom GitHub Bot' || botInstanceName === 'Custom Git Repository Website')) {
+      const match = url.trim().match(/\/([^/]+?)(?:\.git|\/)?$/);
+      if (match && match[1]) {
+        const cleanName = match[1]
+          .replace(/[-_]/g, ' ')
+          .replace(/\b\w/g, (c) => c.toUpperCase());
+        setBotInstanceName(cleanName);
+      }
+    }
+  };
+
   useEffect(() => {
     if (selectedBot) {
-      setBotInstanceName(selectedBot.name);
+      if (selectedBot.id === 'custom-github-bot' || selectedBot.id === 'custom-git-website') {
+        if (!botInstanceName || botInstanceName === 'Custom GitHub Bot' || botInstanceName === 'Custom Git Repository Website') {
+          setBotInstanceName('');
+        }
+      } else {
+        setBotInstanceName(selectedBot.name);
+      }
       if (selectedBot.repoUrl) {
         setCustomRepoUrl(selectedBot.repoUrl);
       }
       setBranch(selectedBot.branch || 'main');
-      setStartCommand(selectedBot.startCommand || 'npm start');
+      setStartCommand(selectedBot.startCommand || (selectedBot.category === 'website' ? 'node server.js' : 'npm start'));
       setBuildCommand(selectedBot.buildCommand || 'npm install');
     }
   }, [selectedBot]);
@@ -572,17 +592,38 @@ export const DeployWizardPage: React.FC = () => {
 
             {/* Instance Name */}
             <div>
-              <label className="block text-xs font-bold text-white mb-1.5">
-                {selectedBot.category === 'website' ? 'Website / App Name' : 'Bot Instance Name'} <span className="text-rose-400">*</span>
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <span>
+                    {selectedBot.id === 'custom-github-bot' || selectedBot.id === 'custom-git-website'
+                      ? 'Custom Repository / Project Name'
+                      : selectedBot.category === 'website'
+                      ? 'Website / Service Name'
+                      : 'Bot Instance Name'}
+                  </span>
+                  <span className="text-rose-400">*</span>
+                </label>
+                {(selectedBot.id === 'custom-github-bot' || selectedBot.id === 'custom-git-website') && (
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                    Custom Name Allowed
+                  </span>
+                )}
+              </div>
               <input
                 type="text"
                 required
                 value={botInstanceName}
                 onChange={(e) => setBotInstanceName(e.target.value)}
-                placeholder={selectedBot.name}
-                className="w-full px-3.5 py-2.5 text-xs bg-[#070b14] border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                placeholder={
+                  selectedBot.id === 'custom-github-bot' || selectedBot.id === 'custom-git-website'
+                    ? 'e.g. My Custom Website or Alpha Bot'
+                    : selectedBot.name
+                }
+                className="w-full px-3.5 py-2.5 text-xs bg-[#070b14] border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
               />
+              <p className="text-[11px] text-slate-500 mt-1">
+                Customize how your project appears on your dashboard, terminal logs, and assigned domain URL.
+              </p>
             </div>
 
             {/* Git Repository URL */}
@@ -604,7 +645,7 @@ export const DeployWizardPage: React.FC = () => {
                 type="url"
                 required={!customRepoUrl && !selectedBot.repoUrl && initialFiles.length === 0}
                 value={customRepoUrl}
-                onChange={(e) => setCustomRepoUrl(e.target.value)}
+                onChange={(e) => handleCustomRepoUrlChange(e.target.value)}
                 placeholder="https://github.com/username/my-website"
                 className="w-full px-3.5 py-2.5 text-xs font-mono bg-[#070b14] border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
               />
@@ -789,6 +830,41 @@ export const DeployWizardPage: React.FC = () => {
             </div>
           </div>
 
+          {/* Domain & URL Information Card */}
+          <div className="p-4 rounded-xl bg-gradient-to-br from-[#0d1526] to-[#070b14] border border-cyan-500/30 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-bold text-white">
+                <Globe className="w-4 h-4 text-cyan-400" />
+                <span>What Domain Will Be Used?</span>
+              </div>
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                Live Gateway & Reverse Proxy
+              </span>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
+                <div className="text-[11px] text-slate-400 font-medium">1. Cloud Gateway Preview Domain (Immediate Access):</div>
+                <div className="font-mono text-cyan-300 text-[11px] break-all select-all flex items-center justify-between gap-2">
+                  <span>{window.location.origin}/live/&lt;assigned-id&gt;/</span>
+                  <span className="text-[10px] text-emerald-400 font-sans font-medium">Active Immediately</span>
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 space-y-1">
+                <div className="text-[11px] text-slate-400 font-medium">2. Production Wildcard Subdomain:</div>
+                <div className="font-mono text-emerald-300 text-[11px] break-all select-all flex items-center justify-between gap-2">
+                  <span>https://{(botInstanceName || selectedBot.name || 'your-repo').toLowerCase().replace(/[^a-z0-9]/g, '-')}.lyrical.cloud/</span>
+                  <span className="text-[10px] text-slate-500 font-sans">Platform Domain</span>
+                </div>
+              </div>
+
+              <div className="text-[11px] text-slate-400 leading-relaxed pt-1">
+                Your application will receive an isolated internal port and direct HTTP proxying with automatic SSL encryption. Custom domains can also be pointed via CNAME at any time.
+              </div>
+            </div>
+          </div>
+
           {/* Free Hosting Summary Box */}
           <div className="p-5 rounded-xl bg-[#0d1526] border border-slate-800/90 space-y-4">
             <div className="flex items-center justify-between">
@@ -810,7 +886,9 @@ export const DeployWizardPage: React.FC = () => {
               className="w-full py-3 px-5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
             >
               <Rocket className="w-4 h-4" />
-              {submitting ? 'Deploying Bot Container...' : `Deploy ${selectedBot.name} Now (Free)`}
+              {submitting
+                ? 'Deploying Container...'
+                : `Deploy ${botInstanceName || selectedBot.name} Now (Free)`}
             </button>
           </div>
         </form>
@@ -848,7 +926,7 @@ export const DeployWizardPage: React.FC = () => {
           <span>✓ 100% Free Hosting</span>
         </div>
 
-        {/* GitHub OAuth Connect Bar */}
+        {/* GitHub OAuth Connect Bar & Custom Repo Action */}
         <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
           <button
             type="button"
@@ -862,6 +940,37 @@ export const DeployWizardPage: React.FC = () => {
               : githubLoading
               ? 'Connecting to GitHub via Firebase...'
               : 'Connect GitHub Account to Deploy Your Repositories'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              const customItem = WEBSITE_CATALOG.find((w) => w.id === 'custom-git-website') || {
+                id: 'custom-git-website',
+                rank: 99,
+                name: 'My Custom Project',
+                author: 'Your Repository',
+                description: 'Custom Git repository deployment with custom naming and live reverse proxying.',
+                repoUrl: '',
+                branch: 'main',
+                startCommand: 'npm start',
+                buildCommand: 'npm install',
+                sessionEnvKey: '',
+                sessionGeneratorUrl: '',
+                image: '',
+                deploymentsCount: 0,
+                category: 'website',
+              };
+              setSelectedBot(customItem);
+              setBotInstanceName('');
+              setCustomRepoUrl('');
+              setSearchParams({ bot: 'custom-git-website' });
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className="px-4 py-2 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-xs font-semibold text-cyan-300 inline-flex items-center gap-2 transition-colors"
+          >
+            <Globe className="w-4 h-4 text-cyan-400" />
+            <span>Deploy Custom Git URL (Name It Yourself)</span>
           </button>
         </div>
       </div>

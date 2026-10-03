@@ -92,6 +92,15 @@
   ],
   "notifications": [
     {
+      "id": "ntf_372b110dc8c5",
+      "userId": "usr_a9d69e3e01768a76",
+      "type": "announcement",
+      "title": "Welcome to LYRICAL",
+      "message": "Your verified workspace is ready. You can deploy WhatsApp bots and websites with live reverse proxy.",
+      "read": false,
+      "createdAt": "2026-10-03T17:24:03.922Z"
+    },
+    {
       "id": "ntf_96eb23569306",
       "userId": "usr_548c5fb0382a6476",
       "type": "announcement",
@@ -179,7 +188,9 @@
     "announcementBanner": "",
     "supportEmail": "support@lyrical.cloud",
     "supportDocsUrl": "https://baileys.whiskeysockets.io",
-    "deploymentApiUrl": ""
+    "deploymentApiUrl": "",
+    "platformDomain": "lyrical.cloud",
+    "requireSignupOtp": true
   },
   "emails": [
     {

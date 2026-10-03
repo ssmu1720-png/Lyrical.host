@@ -133,6 +133,8 @@ async function startServer() {
     res.json({
       status: 'ok',
       platform: db.state.systemSettings.platformName,
+      platformDomain: db.state.systemSettings.platformDomain || 'lyrical.cloud',
+      requireSignupOtp: db.state.systemSettings.requireSignupOtp !== false,
       maintenanceMode: db.state.systemSettings.maintenanceMode,
       maintenanceMessage: db.state.systemSettings.maintenanceMessage,
       maintenanceReturnTime: db.state.systemSettings.maintenanceReturnTime,
@@ -163,13 +165,222 @@ async function startServer() {
     });
   });
 
+  // --- REGISTRATION OTP IN-MEMORY STORE & MAILER ---
+  interface PendingRegistration {
+    email: string;
+    name: string;
+    passwordHash: string;
+    salt: string;
+    otp: string;
+    expiresAt: number;
+    attempts: number;
+  }
+  const pendingRegistrations = new Map<string, PendingRegistration>();
+
+  async function sendSignupOtpEmail(
+    toEmail: string,
+    name: string,
+    otp: string
+  ): Promise<{ delivered: boolean; devOtp?: string; error?: string }> {
+    const settings = db.state.systemSettings;
+    console.log(`[AUTH-OTP] Security OTP for ${toEmail}: ${otp}`);
+
+    if (!settings.smtpHost || !settings.smtpUser || !settings.smtpPass) {
+      // In dev/preview without external SMTP configured, return devOtp for preview testing
+      return { delivered: false, devOtp: otp };
+    }
+
+    try {
+      const transporter = nodemailer.createTransport({
+        host: settings.smtpHost,
+        port: Number(settings.smtpPort) || 587,
+        secure: Number(settings.smtpPort) === 465,
+        auth: {
+          user: settings.smtpUser,
+          pass: settings.smtpPass,
+        },
+      });
+
+      await transporter.sendMail({
+        from:
+          settings.smtpFrom ||
+          `"${settings.platformName || 'LYRICAL'}" <${
+            settings.supportEmail || 'security@lyrical.cloud'
+          }>`,
+        to: toEmail,
+        subject: `${otp} is your LYRICAL verification code`,
+        text: `Hello ${name},\n\nYour LYRICAL 6-digit verification code is: ${otp}\n\nThis security code will expire in 10 minutes.\n\n— LYRICAL Security Team`,
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0b0f19; color: #f8fafc; padding: 32px 16px; border-radius: 12px; max-width: 500px; margin: 0 auto;">
+            <div style="text-align: center; margin-bottom: 24px;">
+              <div style="font-size: 26px; font-weight: 800; color: #38bdf8; letter-spacing: 2px;">
+                ${settings.platformName || 'LYRICAL'}
+              </div>
+              <div style="font-size: 13px; color: #94a3b8; margin-top: 4px;">Account Security Verification</div>
+            </div>
+            <div style="background-color: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: 24px; text-align: center;">
+              <p style="font-size: 15px; color: #e2e8f0; margin-top: 0;">Hello <strong>${name}</strong>,</p>
+              <p style="font-size: 13px; color: #94a3b8; line-height: 1.5;">
+                Enter this 6-digit verification code to complete your signup and secure your WhatsApp and website deployment workspace:
+              </p>
+              <div style="background: #1e293b; border: 1px dashed #38bdf8; border-radius: 8px; padding: 18px; margin: 24px 0; font-size: 32px; font-weight: 700; letter-spacing: 8px; color: #38bdf8; font-family: monospace;">
+                ${otp}
+              </div>
+              <p style="font-size: 12px; color: #64748b; margin: 0;">
+                This code expires in <strong>10 minutes</strong>. If you did not request this, please ignore this email.
+              </p>
+            </div>
+            <div style="text-align: center; margin-top: 20px; font-size: 11px; color: #64748b;">
+              Automated security message from ${settings.platformName || 'LYRICAL'} Cloud Platform.
+            </div>
+          </div>
+        `,
+      });
+      return { delivered: true };
+    } catch (err: any) {
+      console.error('[AUTH-OTP-DISPATCH-ERR]', err.message);
+      return { delivered: false, devOtp: otp, error: err.message };
+    }
+  }
+
   // --- AUTHENTICATION ROUTES ---
-  app.post('/api/auth/register', (req, res) => {
+  app.post('/api/auth/register-send-otp', async (req, res) => {
     try {
       if (!db.state.systemSettings.registrationEnabled) {
         return res.status(403).json({ error: 'New account registration is currently disabled by the administrator.' });
       }
       const { email, password, name } = req.body;
+      if (!email || !password || !name) {
+        return res.status(400).json({ error: 'Name, email, and password are required.' });
+      }
+      const normalizedEmail = String(email).trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+        return res.status(400).json({ error: 'Please provide a valid email address.' });
+      }
+      if (String(password).length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+      }
+
+      const existingUser = db.state.users.find(u => u.email.toLowerCase() === normalizedEmail);
+      if (existingUser && !(existingUser.id === 'usr_admin_root' && existingUser.lastLoginAt === existingUser.createdAt)) {
+        return res.status(409).json({ error: 'An account with this email address already exists. Please sign in instead.' });
+      }
+
+      const creds = hashPassword(String(password));
+      const otp = String(crypto.randomInt(100000, 999999));
+      const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+      pendingRegistrations.set(normalizedEmail, {
+        email: normalizedEmail,
+        name: String(name).trim().slice(0, 80),
+        passwordHash: creds.hash,
+        salt: creds.salt,
+        otp,
+        expiresAt,
+        attempts: 0,
+      });
+
+      const sendResult = await sendSignupOtpEmail(normalizedEmail, String(name).trim(), otp);
+
+      res.json({
+        ok: true,
+        email: normalizedEmail,
+        delivered: sendResult.delivered,
+        devOtp: sendResult.devOtp,
+        message: sendResult.delivered
+          ? 'A 6-digit security code has been sent to your Gmail/email address.'
+          : 'Security OTP generated for verification.',
+      });
+    } catch {
+      res.status(500).json({ error: 'Failed to send verification code. Please try again.' });
+    }
+  });
+
+  app.post('/api/auth/register-verify-otp', async (req, res) => {
+    try {
+      const { email, otp } = req.body;
+      if (!email || !otp) {
+        return res.status(400).json({ error: 'Email and 6-digit OTP code are required.' });
+      }
+      const normalizedEmail = String(email).trim().toLowerCase();
+      const pending = pendingRegistrations.get(normalizedEmail);
+
+      if (!pending) {
+        return res.status(400).json({ error: 'No pending registration found or verification expired. Please request a new code.' });
+      }
+
+      if (Date.now() > pending.expiresAt) {
+        pendingRegistrations.delete(normalizedEmail);
+        return res.status(400).json({ error: 'Verification code has expired. Please request a new code.' });
+      }
+
+      const cleanCode = String(otp).trim().replace(/\s+/g, '');
+      if (cleanCode !== pending.otp) {
+        pending.attempts += 1;
+        if (pending.attempts >= 5) {
+          pendingRegistrations.delete(normalizedEmail);
+          return res.status(400).json({ error: 'Too many incorrect attempts. Please request a fresh code.' });
+        }
+        return res.status(400).json({ error: 'Invalid verification code. Please check your Gmail/email.' });
+      }
+
+      // Check if root admin claiming initial credentials
+      const existingUser = db.state.users.find(u => u.email.toLowerCase() === normalizedEmail);
+      if (existingUser && existingUser.id === 'usr_admin_root' && existingUser.lastLoginAt === existingUser.createdAt) {
+        existingUser.name = pending.name;
+        existingUser.passwordHash = pending.passwordHash;
+        existingUser.salt = pending.salt;
+        existingUser.emailVerified = true;
+        existingUser.lastLoginAt = new Date().toISOString();
+        const token = createSessionForUser(existingUser, req);
+        pendingRegistrations.delete(normalizedEmail);
+        db.save();
+        await cloudFirestoreSync.saveToFirestore(db.state).catch(() => {});
+        return res.json({ token, user: sanitizeUser(existingUser) });
+      }
+
+      const isFirstOrOwner = normalizedEmail === 'ssmu1720@gmail.com' || db.state.users.length === 0;
+      const newUser: UserRecord = {
+        id: `usr_${crypto.randomBytes(8).toString('hex')}`,
+        email: normalizedEmail,
+        name: pending.name,
+        passwordHash: pending.passwordHash,
+        salt: pending.salt,
+        role: isFirstOrOwner ? 'admin' : 'user',
+        suspended: false,
+        emailVerified: true,
+        createdAt: new Date().toISOString(),
+        lastLoginAt: new Date().toISOString(),
+      };
+
+      db.state.users.push(newUser);
+      const token = createSessionForUser(newUser, req);
+      db.addNotification(
+        newUser.id,
+        'announcement',
+        'Welcome to LYRICAL',
+        'Your verified workspace is ready. You can deploy WhatsApp bots and websites with live reverse proxy.'
+      );
+
+      pendingRegistrations.delete(normalizedEmail);
+      db.save();
+      await cloudFirestoreSync.saveToFirestore(db.state).catch(() => {});
+
+      res.status(201).json({
+        token,
+        user: sanitizeUser(newUser),
+      });
+    } catch {
+      res.status(500).json({ error: 'Failed to verify security code.' });
+    }
+  });
+
+  app.post('/api/auth/register', async (req, res) => {
+    try {
+      if (!db.state.systemSettings.registrationEnabled) {
+        return res.status(403).json({ error: 'New account registration is currently disabled by the administrator.' });
+      }
+      const { email, password, name, otp } = req.body;
       if (!email || !password || !name) {
         return res.status(400).json({ error: 'Name, email, and password are required.' });
       }
@@ -190,6 +401,7 @@ async function startServer() {
           existingUser.name = String(name).trim().slice(0, 80);
           existingUser.passwordHash = creds.hash;
           existingUser.salt = creds.salt;
+          existingUser.emailVerified = true;
           existingUser.lastLoginAt = new Date().toISOString();
           const token = createSessionForUser(existingUser, req);
           db.save();
@@ -200,6 +412,37 @@ async function startServer() {
         }
         return res.status(409).json({ error: 'An account with this email address already exists. Please sign in instead.' });
       }
+
+      // If OTP is provided, verify it
+      if (otp) {
+        const pending = pendingRegistrations.get(normalizedEmail);
+        if (pending && String(otp).trim() === pending.otp && Date.now() <= pending.expiresAt) {
+          pendingRegistrations.delete(normalizedEmail);
+        } else if (db.state.systemSettings.requireSignupOtp !== false) {
+          return res.status(400).json({ error: 'Invalid or expired verification code.' });
+        }
+      } else if (db.state.systemSettings.requireSignupOtp !== false) {
+        // Generate and dispatch OTP
+        const newOtp = String(crypto.randomInt(100000, 999999));
+        pendingRegistrations.set(normalizedEmail, {
+          email: normalizedEmail,
+          name: String(name).trim().slice(0, 80),
+          passwordHash: creds.hash,
+          salt: creds.salt,
+          otp: newOtp,
+          expiresAt: Date.now() + 10 * 60 * 1000,
+          attempts: 0,
+        });
+        const sendResult = await sendSignupOtpEmail(normalizedEmail, String(name).trim(), newOtp);
+        return res.json({
+          requiresOtp: true,
+          email: normalizedEmail,
+          delivered: sendResult.delivered,
+          devOtp: sendResult.devOtp,
+          message: 'Please enter the 6-digit security code sent to your email to verify your account.',
+        });
+      }
+
       const isFirstOrOwner = normalizedEmail === 'ssmu1720@gmail.com' || db.state.users.length === 0;
       const newUser: UserRecord = {
         id: `usr_${crypto.randomBytes(8).toString('hex')}`,
@@ -217,6 +460,8 @@ async function startServer() {
       db.state.users.push(newUser);
       const token = createSessionForUser(newUser, req);
       db.addNotification(newUser.id, 'announcement', 'Welcome to LYRICAL', 'Your WhatsApp bot hosting workspace is ready. Click Deploy Bot to launch your first instance.');
+      db.save();
+      await cloudFirestoreSync.saveToFirestore(db.state).catch(() => {});
 
       res.status(201).json({
         token,

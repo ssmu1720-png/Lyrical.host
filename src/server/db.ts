@@ -160,6 +160,8 @@ export interface SystemSettingsRecord {
   smtpUser?: string;
   smtpPass?: string;
   smtpFrom?: string;
+  platformDomain?: string;
+  requireSignupOtp?: boolean;
 }
 
 export interface DatabaseSchema {
@@ -250,6 +252,8 @@ function getInitialDatabase(): DatabaseSchema {
       supportEmail: 'support@lyrical.cloud',
       supportDocsUrl: 'https://baileys.whiskeysockets.io',
       deploymentApiUrl: process.env.DEPLOYMENT_API_URL || '',
+      platformDomain: 'lyrical.cloud',
+      requireSignupOtp: true,
     }
   };
 }

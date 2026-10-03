@@ -25,6 +25,7 @@ import {
   Download,
   Upload,
   Cloud,
+  Globe,
 } from 'lucide-react';
 import { apiRequest, formatUptime } from '../lib/api';
 
@@ -1127,6 +1128,76 @@ export const AdminSettingsPage: React.FC<{ onSettingsUpdated?: () => void }> = (
             onChange={(e) => setSettings({ ...settings, registrationEnabled: e.target.checked })}
             className="w-4 h-4 accent-cyan-500"
           />
+        </div>
+
+        <div className="flex items-center justify-between pt-3 border-t border-slate-800/80">
+          <div>
+            <div className="text-xs font-semibold text-white">Require Signup OTP Verification</div>
+            <div className="text-[11px] text-slate-400">
+              When enabled, new registrants must verify their email with a 6-digit security code sent to their Gmail/inbox
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.requireSignupOtp !== false}
+            onChange={(e) => setSettings({ ...settings, requireSignupOtp: e.target.checked })}
+            className="w-4 h-4 accent-cyan-500"
+          />
+        </div>
+      </div>
+
+      {/* Domain & Reverse Proxy Routing Card */}
+      <div className="p-6 rounded-xl border border-slate-800 bg-slate-900/60 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+              <Globe className="w-4 h-4 text-cyan-400" />
+              Domain & Live Gateway Configuration
+            </h2>
+            <p className="text-xs text-slate-400">
+              Configure the primary platform domain and inspect live reverse proxy routes.
+            </p>
+          </div>
+          <span className="px-2.5 py-1 rounded-md text-[11px] font-mono bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+            Gateway Active
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">Primary Platform Domain</label>
+            <input
+              type="text"
+              value={settings.platformDomain || 'lyrical.cloud'}
+              onChange={(e) => setSettings({ ...settings, platformDomain: e.target.value })}
+              placeholder="e.g. lyrical.cloud"
+              className="w-full px-3.5 py-2 text-xs font-mono bg-slate-950 border border-slate-800 rounded-lg text-white"
+            />
+            <p className="text-[11px] text-slate-500 mt-1">
+              Used for wildcard subdomain routing: <code>https://&lt;bot-name&gt;.{settings.platformDomain || 'lyrical.cloud'}</code>
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">Current Cloud Gateway Origin</label>
+            <input
+              type="text"
+              disabled
+              value={window.location.origin}
+              className="w-full px-3.5 py-2 text-xs font-mono bg-slate-950/70 border border-slate-800 rounded-lg text-slate-400 cursor-not-allowed"
+            />
+            <p className="text-[11px] text-slate-500 mt-1">
+              Immediate live proxy path: <code>{window.location.origin}/live/&lt;bot-id&gt;/</code>
+            </p>
+          </div>
+        </div>
+
+        <div className="p-3.5 rounded-lg bg-slate-950 border border-slate-800 space-y-1 text-xs">
+          <div className="font-semibold text-slate-200">How Domain Routing Works in LYRICAL:</div>
+          <p className="text-slate-400 leading-relaxed">
+            1. <strong>Direct Gateway (Default):</strong> Any deployed website or bot is reachable at <code>/live/:id/</code> on the current domain with instant zero-configuration SSL.<br/>
+            2. <strong>Custom Domains:</strong> To attach your own domain or subdomains, add a DNS CNAME record pointing to this server hostname. The reverse proxy will automatically route requests.
+          </p>
         </div>
       </div>
 
