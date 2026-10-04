@@ -97,24 +97,6 @@ export const WEBSITE_CATALOG: CatalogBotItem[] = [
     featuredLabel: 'PYTHON WEB',
     category: 'website',
   },
-  {
-    id: 'custom-git-website',
-    rank: 5,
-    name: 'Custom Git Repository Website',
-    author: 'Your Repository',
-    description:
-      'Deploy any custom React, Next.js, Node.js, HTML5, or Python web app directly from your own GitHub repository URL with your own project name.',
-    repoUrl: '',
-    branch: 'main',
-    startCommand: 'npm start',
-    buildCommand: 'npm install',
-    sessionEnvKey: '',
-    sessionGeneratorUrl: '',
-    image: ultraGuruImg,
-    deploymentsCount: 1650,
-    featuredLabel: 'CUSTOM REPO',
-    category: 'website',
-  },
 ];
 
 export const BOT_CATALOG: CatalogBotItem[] = [

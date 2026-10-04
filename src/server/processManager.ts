@@ -311,14 +311,11 @@ class RealProcessManager {
         const ghTokenEnv = db.state.envVars.find(
           (e) => e.botId === bot.id && e.key === 'GITHUB_TOKEN' && e.value.trim() !== ''
         );
-        const userGithubToken = db.state.users.find((u) => u.id === bot.userId)?.githubToken;
-        const effectiveGhToken = ghTokenEnv?.value?.trim() || userGithubToken?.trim() || '';
-
         const cloneUrl =
-          effectiveGhToken && cleanRepo.startsWith('https://github.com/')
+          ghTokenEnv && cleanRepo.startsWith('https://github.com/')
             ? cleanRepo.replace(
                 'https://github.com/',
-                `https://x-access-token:${encodeURIComponent(effectiveGhToken)}@github.com/`
+                `https://x-access-token:${encodeURIComponent(ghTokenEnv.value.trim())}@github.com/`
               )
             : cleanRepo;
 

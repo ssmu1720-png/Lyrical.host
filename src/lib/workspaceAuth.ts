@@ -281,22 +281,8 @@ githubProvider.addScope('user:email');
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
-let cachedGithubToken: string | null = (() => {
-  try {
-    return localStorage.getItem('lyrical_github_token');
-  } catch {
-    return null;
-  }
-})();
-
-let cachedGithubUser: { login: string; avatar_url?: string; html_url?: string } | null = (() => {
-  try {
-    const raw = localStorage.getItem('lyrical_github_user');
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-})();
+let cachedGithubToken: string | null = null;
+let cachedGithubUser: { login: string; avatar_url?: string; html_url?: string } | null = null;
 
 export interface GithubRepoItem {
   id: number;
@@ -309,323 +295,116 @@ export interface GithubRepoItem {
   description: string | null;
   updated_at: string;
   language: string | null;
-  stargazers_count?: number;
-  forks_count?: number;
-  topics?: string[];
 }
 
 export const getGithubAccessToken = (): string | null => cachedGithubToken;
 export const getConnectedGithubUser = () => cachedGithubUser;
 
-export const disconnectGithub = async () => {
+export const disconnectGithub = () => {
   cachedGithubToken = null;
   cachedGithubUser = null;
-  try {
-    localStorage.removeItem('lyrical_github_token');
-    localStorage.removeItem('lyrical_github_user');
-  } catch {}
-  try {
-    await fetch('/api/github/disconnect', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('lyrical_auth_token') || ''}`,
-      },
-    });
-  } catch {}
-};
-
-export const checkGithubStatus = async (): Promise<{
-  connected: boolean;
-  oauthConfigured: boolean;
-  callbackUrl?: string;
-  user: { login: string; avatar_url?: string } | null;
-}> => {
-  try {
-    const sessionToken = localStorage.getItem('lyrical_auth_token');
-    if (!sessionToken) {
-      return {
-        connected: !!cachedGithubToken,
-        oauthConfigured: false,
-        user: cachedGithubUser,
-      };
-    }
-    const res = await fetch('/api/github/status', {
-      headers: { Authorization: `Bearer ${sessionToken}` },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.user) {
-        cachedGithubUser = data.user;
-        try {
-          localStorage.setItem('lyrical_github_user', JSON.stringify(data.user));
-        } catch {}
-      }
-      return data;
-    }
-  } catch {}
-
-  return {
-    connected: !!cachedGithubToken,
-    oauthConfigured: false,
-    user: cachedGithubUser,
-  };
-};
-
-export const connectGithubWithToken = async (
-  token: string
-): Promise<{ login: string; avatar_url?: string; html_url?: string }> => {
-  const cleanToken = token.trim();
-  const sessionToken = localStorage.getItem('lyrical_auth_token');
-
-  // Try server endpoint first to persist for this user account
-  if (sessionToken) {
-    const res = await fetch('/api/github/connect-token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${sessionToken}`,
-      },
-      body: JSON.stringify({ token: cleanToken }),
-    });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Invalid GitHub token. Please verify token permissions (needs "repo" and "read:user").');
-    }
-
-    const data = await res.json();
-    cachedGithubToken = cleanToken;
-    cachedGithubUser = {
-      login: data.user.login,
-      avatar_url: data.user.avatar_url,
-      html_url: data.user.html_url,
-    };
-    try {
-      localStorage.setItem('lyrical_github_token', cleanToken);
-      localStorage.setItem('lyrical_github_user', JSON.stringify(cachedGithubUser));
-    } catch {}
-    return cachedGithubUser;
-  }
-
-  // Fallback direct check against GitHub API
-  const res = await fetch('https://api.github.com/user', {
-    headers: {
-      Authorization: `Bearer ${cleanToken}`,
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'LYRICAL-Cloud-Platform',
-    },
-  });
-  if (!res.ok) {
-    throw new Error('Invalid GitHub Personal Access Token. Please verify token permissions and expiration.');
-  }
-  const profile = await res.json();
-  cachedGithubToken = cleanToken;
-  cachedGithubUser = {
-    login: profile.login,
-    avatar_url: profile.avatar_url,
-    html_url: profile.html_url,
-  };
-  try {
-    localStorage.setItem('lyrical_github_token', cleanToken);
-    localStorage.setItem('lyrical_github_user', JSON.stringify(cachedGithubUser));
-  } catch {}
-  return cachedGithubUser;
-};
-
-export const fetchPublicGithubRepos = async (
-  username: string
-): Promise<GithubRepoItem[]> => {
-  const clean = username.trim().replace(/^@/, '');
-  if (!clean) return [];
-
-  const headers: Record<string, string> = {
-    Accept: 'application/vnd.github+json',
-  };
-  if (cachedGithubToken) {
-    headers['Authorization'] = `Bearer ${cachedGithubToken}`;
-  }
-
-  // First try user repos
-  let res = await fetch(
-    `https://api.github.com/users/${encodeURIComponent(clean)}/repos?sort=updated&per_page=100`,
-    { headers }
-  );
-
-  // If 404, try organization repos
-  if (res.status === 404) {
-    res = await fetch(
-      `https://api.github.com/orgs/${encodeURIComponent(clean)}/repos?sort=updated&per_page=100`,
-      { headers }
-    );
-  }
-
-  if (!res.ok) {
-    if (res.status === 404) {
-      throw new Error(`GitHub user or organization "@${clean}" was not found.`);
-    }
-    if (res.status === 403) {
-      throw new Error('GitHub API rate limit exceeded. Connect with GitHub Token to raise rate limits.');
-    }
-    throw new Error(`Failed to fetch repositories for "@${clean}".`);
-  }
-
-  return await res.json();
-};
-
-/**
- * Initiates GitHub OAuth Popup Flow following OAuth Integration Guidelines (SKILL.md)
- */
-export const githubOAuthSignIn = async (): Promise<{
-  token: string;
-  user: { login: string; avatar_url?: string; html_url?: string };
-}> => {
-  // 1. Fetch the OAuth URL from server
-  const urlRes = await fetch('/api/auth/github/url');
-  if (!urlRes.ok) {
-    throw new Error('Failed to retrieve GitHub OAuth configuration.');
-  }
-  const urlData = await urlRes.json();
-  if (!urlData.configured || !urlData.url) {
-    const err: any = new Error(
-      urlData.message ||
-        'GitHub OAuth App credentials (CLIENT_ID) are not configured. Please use a GitHub Personal Access Token or configure OAuth credentials.'
-    );
-    err.code = 'OAUTH_NOT_CONFIGURED';
-    err.redirectUri = urlData.redirectUri;
-    throw err;
-  }
-
-  // 2. Open popup directly with provider authorization URL
-  const popup = window.open(
-    urlData.url,
-    'github_oauth_popup',
-    'width=600,height=720,menubar=no,toolbar=no,status=no'
-  );
-
-  if (!popup) {
-    throw new Error('Sign-in popup was blocked by your browser. Please allow popups for this site and try again.');
-  }
-
-  // 3. Wait for postMessage event from popup callback
-  return new Promise((resolve, reject) => {
-    let resolved = false;
-
-    const timer = setInterval(() => {
-      if (popup.closed && !resolved) {
-        clearInterval(timer);
-        window.removeEventListener('message', messageListener);
-        reject(new Error('GitHub authorization window was closed before completing.'));
-      }
-    }, 1000);
-
-    const messageListener = async (event: MessageEvent) => {
-      // Validate origin
-      const origin = event.origin;
-      if (!origin.endsWith('.run.app') && !origin.includes('localhost') && origin !== window.location.origin) {
-        return;
-      }
-
-      if (event.data?.type === 'OAUTH_AUTH_SUCCESS' && event.data?.provider === 'github') {
-        resolved = true;
-        clearInterval(timer);
-        window.removeEventListener('message', messageListener);
-
-        const token = event.data.token;
-        const ghUser = event.data.user || { login: 'github-user' };
-
-        cachedGithubToken = token;
-        cachedGithubUser = ghUser;
-        try {
-          localStorage.setItem('lyrical_github_token', token);
-          localStorage.setItem('lyrical_github_user', JSON.stringify(ghUser));
-        } catch {}
-
-        // Persist to user record on server
-        const sessionToken = localStorage.getItem('lyrical_auth_token');
-        if (sessionToken) {
-          try {
-            await fetch('/api/github/save-session-token', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${sessionToken}`,
-              },
-              body: JSON.stringify({ token, user: ghUser }),
-            });
-          } catch {}
-        }
-
-        resolve({ token, user: ghUser });
-      }
-    };
-
-    window.addEventListener('message', messageListener);
-  });
 };
 
 export const githubSignIn = async (): Promise<{
-  user?: FirebaseUser;
+  user: FirebaseUser;
   githubAccessToken: string;
   githubUsername: string;
   email: string;
 } | null> => {
-  // First attempt OAuth skill popup flow
   try {
-    const oauthRes = await githubOAuthSignIn();
-    return {
-      githubAccessToken: oauthRes.token,
-      githubUsername: oauthRes.user.login,
-      email: `${oauthRes.user.login}@users.noreply.github.com`,
-    };
-  } catch (oauthErr: any) {
-    if (oauthErr.code === 'OAUTH_NOT_CONFIGURED') {
-      // Re-throw so UI can offer immediate PAT token input
-      throw oauthErr;
+    isSigningIn = true;
+    let result;
+    if (auth.currentUser) {
+      try {
+        result = await linkWithPopup(auth.currentUser, githubProvider);
+      } catch (linkErr: any) {
+        // If already linked or credential-already-in-use, sign in directly with popup
+        if (
+          linkErr?.code === 'auth/provider-already-linked' ||
+          linkErr?.code === 'auth/credential-already-in-use' ||
+          linkErr?.code === 'auth/email-already-in-use'
+        ) {
+          result = await signInWithPopup(auth, githubProvider);
+        } else {
+          throw linkErr;
+        }
+      }
+    } else {
+      result = await signInWithPopup(auth, githubProvider);
     }
-    // If user closed popup
-    if (oauthErr.message?.includes('closed')) {
+
+    const credential = GithubAuthProvider.credentialFromResult(result);
+    const token = credential?.accessToken;
+    if (!token) {
+      throw new Error('Failed to obtain GitHub OAuth access token from Firebase Authentication.');
+    }
+
+    cachedGithubToken = token;
+
+    // Fetch GitHub profile details using the OAuth token
+    let ghLogin = result.user.displayName || 'github-user';
+    let ghEmail = result.user.email || '';
+    try {
+      const ghRes = await fetch('https://api.github.com/user', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+        },
+      });
+      if (ghRes.ok) {
+        const profile = await ghRes.json();
+        ghLogin = profile.login || ghLogin;
+        cachedGithubUser = {
+          login: profile.login,
+          avatar_url: profile.avatar_url,
+          html_url: profile.html_url,
+        };
+        if (!ghEmail && profile.email) {
+          ghEmail = profile.email;
+        }
+      }
+    } catch {
+      // ignore profile fetch error
+    }
+
+    if (!ghEmail) {
+      ghEmail = `${ghLogin.toLowerCase()}@users.noreply.github.com`;
+    }
+
+    await syncUserProfileToFirestore(result.user, ghLogin);
+
+    return {
+      user: result.user,
+      githubAccessToken: token,
+      githubUsername: ghLogin,
+      email: ghEmail,
+    };
+  } catch (error: any) {
+    if (
+      error?.code === 'auth/popup-closed-by-user' ||
+      error?.code === 'auth/cancelled-popup-request'
+    ) {
       return null;
     }
-    throw oauthErr;
+    throw error;
+  } finally {
+    isSigningIn = false;
   }
 };
 
 export async function listUserGithubRepos(): Promise<GithubRepoItem[]> {
-  const sessionToken = localStorage.getItem('lyrical_auth_token');
-
-  // Try server endpoint first
-  if (sessionToken) {
-    try {
-      const res = await fetch('/api/github/repos', {
-        headers: {
-          Authorization: `Bearer ${sessionToken}`,
-          Accept: 'application/vnd.github+json',
-        },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        return data.repos || [];
-      }
-    } catch {}
-  }
-
-  // Fallback to direct client API if cached token exists
   if (!cachedGithubToken) {
     throw new Error('NEEDS_GITHUB_AUTH');
   }
-
   const res = await fetch(
-    'https://api.github.com/user/repos?sort=updated&per_page=100&affiliation=owner,collaborator',
+    'https://api.github.com/user/repos?sort=updated&per_page=50&affiliation=owner,collaborator',
     {
       headers: {
         Authorization: `Bearer ${cachedGithubToken}`,
         Accept: 'application/vnd.github+json',
-        'User-Agent': 'LYRICAL-Cloud-Platform',
       },
     }
   );
-
   if (res.status === 401 || res.status === 403) {
     cachedGithubToken = null;
     throw new Error('NEEDS_GITHUB_AUTH');
@@ -633,22 +412,7 @@ export async function listUserGithubRepos(): Promise<GithubRepoItem[]> {
   if (!res.ok) {
     throw new Error('Failed to fetch repositories from GitHub.');
   }
-
-  const repos = await res.json();
-  return repos.map((r: any) => ({
-    id: r.id,
-    name: r.name,
-    full_name: r.full_name,
-    private: !!r.private,
-    description: r.description,
-    clone_url: r.clone_url,
-    html_url: r.html_url,
-    default_branch: r.default_branch || 'main',
-    language: r.language || null,
-    stargazers_count: r.stargazers_count || 0,
-    updated_at: r.updated_at,
-    fork: !!r.fork,
-  }));
+  return await res.json();
 }
 
 export const initAuth = (

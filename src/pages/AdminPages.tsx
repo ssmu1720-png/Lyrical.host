@@ -1259,7 +1259,7 @@ export const AdminSettingsPage: React.FC<{ onSettingsUpdated?: () => void }> = (
         </div>
       </div>
     </form>
-    </div>
+  </div>
   );
 };
 

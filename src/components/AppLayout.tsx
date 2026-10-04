@@ -17,7 +17,6 @@ import {
   FileText,
   Activity,
   Mail,
-  GitBranch,
 } from 'lucide-react';
 import { User } from '../lib/api';
 
@@ -46,9 +45,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 
   const userNavItems = [
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { path: '/bots', label: 'Bots & Websites', icon: BotIcon },
-    { path: '/deploy', label: 'Deploy', icon: Rocket },
-    { path: '/import-git', label: 'Import from Git', icon: GitBranch },
+    { path: '/bots', label: 'My Bots', icon: BotIcon },
+    { path: '/deploy', label: 'Deploy Bot', icon: Rocket },
     { path: '/notifications', label: 'Notifications', icon: Bell, badge: unreadNotifications },
     { path: '/profile', label: 'Profile', icon: UserIcon },
     { path: '/settings', label: 'Settings', icon: Settings },
@@ -111,7 +109,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
                 : 'text-slate-400 hover:text-slate-100'
             }`}
           >
-            Bots & Sites
+            Bots
           </Link>
           <Link
             to="/deploy"
@@ -122,17 +120,6 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             }`}
           >
             Deploy
-          </Link>
-          <Link
-            to="/import-git"
-            className={`transition-colors whitespace-nowrap flex items-center gap-1.5 ${
-              location.pathname === '/import-git' || location.pathname === '/github'
-                ? 'text-cyan-400 underline underline-offset-8 font-semibold'
-                : 'text-slate-400 hover:text-slate-100'
-            }`}
-          >
-            <GitBranch className="w-3.5 h-3.5 text-cyan-400" />
-            Git Import
           </Link>
           <Link
             to="/support"
