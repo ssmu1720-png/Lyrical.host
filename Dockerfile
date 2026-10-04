@@ -15,10 +15,7 @@ RUN npm install
 COPY . .
 RUN npm run build
 
-RUN mkdir -p /app/data
-
 ENV NODE_ENV=production
-VOLUME ["/app/data"]
 EXPOSE 3000
 
 CMD ["npx", "tsx", "server.ts"]

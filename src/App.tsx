@@ -28,7 +28,6 @@ import {
   AdminServersPage,
   AdminLogsAndAuditPage,
   AdminSettingsPage,
-  AdminEmailsPage,
 } from './pages/AdminPages';
 
 export default function App() {
@@ -251,16 +250,6 @@ export default function App() {
                     element={
                       user.role === 'admin' ? (
                         <AdminUsersPage />
-                      ) : (
-                        <Navigate to="/dashboard" replace />
-                      )
-                    }
-                  />
-                  <Route
-                    path="/admin/emails"
-                    element={
-                      user.role === 'admin' ? (
-                        <AdminEmailsPage />
                       ) : (
                         <Navigate to="/dashboard" replace />
                       )

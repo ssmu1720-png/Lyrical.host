@@ -271,13 +271,5 @@ service cloud.firestore {
 
       allow update, delete: if false;
     }
-
-    // Platform State & Container Database Persistence
-    match /platformState/{docId} {
-      allow read, write: if true;
-    }
-    match /cloudBackups/{backupId} {
-      allow read, write: if true;
-    }
   }
 }

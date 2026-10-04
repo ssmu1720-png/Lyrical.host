@@ -1,46 +1,167 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import {
-  Shield,
-  AlertCircle,
-  CheckCircle2,
-  Eye,
-  EyeOff,
-  Lock,
-  Mail,
-  User as UserIcon,
-  Sparkles,
-  ArrowRight,
-} from 'lucide-react';
+import { Shield, AlertCircle, CheckCircle2, Info } from 'lucide-react';
 import { apiRequest, setStoredSessionToken, User } from '../lib/api';
+import {
+  googleSignIn,
+  githubSignIn,
+  firebaseLoginEmailPassword,
+  firebaseRegisterEmailPassword,
+  firebaseResetPasswordEmail,
+} from '../lib/workspaceAuth';
 
 interface AuthProps {
   onAuthenticated: (user: User) => void;
 }
 
+const GoogleSignInButton: React.FC<{ onClick: () => void; disabled?: boolean }> = ({
+  onClick,
+  disabled,
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    className="gsi-material-button disabled:opacity-50"
+  >
+    <div className="gsi-material-button-state"></div>
+    <div className="gsi-material-button-content-wrapper">
+      <div className="gsi-material-button-icon">
+        <svg
+          version="1.1"
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 48 48"
+          style={{ display: 'block' }}
+        >
+          <path
+            fill="#EA4335"
+            d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+          ></path>
+          <path
+            fill="#4285F4"
+            d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+          ></path>
+          <path
+            fill="#FBBC05"
+            d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+          ></path>
+          <path
+            fill="#34A853"
+            d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+          ></path>
+          <path fill="none" d="M0 0h48v48H0z"></path>
+        </svg>
+      </div>
+      <span className="gsi-material-button-contents">Sign in with Google</span>
+      <span style={{ display: 'none' }}>Sign in with Google</span>
+    </div>
+  </button>
+);
+
+const GithubSignInButton: React.FC<{ onClick: () => void; disabled?: boolean }> = ({
+  onClick,
+  disabled,
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    className="w-full h-10 px-4 rounded-lg bg-[#24292F] hover:bg-[#2c3239] border border-slate-700 text-white text-xs font-semibold flex items-center justify-center gap-2.5 transition-colors disabled:opacity-50"
+  >
+    <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
+      />
+    </svg>
+    <span>Continue with GitHub</span>
+  </button>
+);
+
 export const LoginPage: React.FC<AuthProps> = ({ onAuthenticated }) => {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showProviderGuide, setShowProviderGuide] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     try {
+      // Attempt Firebase Email/Password sign in and Firestore profile sync
+      try {
+        await firebaseLoginEmailPassword(email, password);
+      } catch (fbErr: any) {
+        if (fbErr?.code === 'auth/operation-not-allowed') {
+          setShowProviderGuide(true);
+        }
+      }
       const res = await apiRequest<{ token: string; user: User }>('/api/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+        body: JSON.stringify({ email, password }),
       });
       setStoredSessionToken(res.token);
       onAuthenticated(res.user);
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.message || 'Invalid email or password. Please verify your credentials.');
+      setError(err.message || 'Sign in failed. Check your credentials and try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await googleSignIn();
+      if (result && result.user.email) {
+        const res = await apiRequest<{ token: string; user: User }>('/api/auth/google-sync', {
+          method: 'POST',
+          body: JSON.stringify({
+            email: result.user.email,
+            name: result.user.displayName || result.user.email.split('@')[0],
+          }),
+        });
+        setStoredSessionToken(res.token);
+        onAuthenticated(res.user);
+        navigate('/dashboard');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Google authentication could not be completed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGithubLogin = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await githubSignIn();
+      if (result && result.email) {
+        const res = await apiRequest<{ token: string; user: User }>('/api/auth/google-sync', {
+          method: 'POST',
+          body: JSON.stringify({
+            email: result.email,
+            name: result.githubUsername || 'GitHub Developer',
+          }),
+        });
+        setStoredSessionToken(res.token);
+        onAuthenticated(res.user);
+        navigate('/dashboard');
+      }
+    } catch (err: any) {
+      if (err?.code === 'auth/operation-not-allowed') {
+        setShowProviderGuide(true);
+        setError('Enable the GitHub provider in Firebase Console → Authentication → Sign-in method → GitHub.');
+      } else {
+        setError(err.message || 'GitHub authentication could not be completed.');
+      }
     } finally {
       setLoading(false);
     }
@@ -48,117 +169,94 @@ export const LoginPage: React.FC<AuthProps> = ({ onAuthenticated }) => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4">
-      {/* Background Glow */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
-
-      <div className="relative w-full max-w-md bg-slate-900/80 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-6 shadow-2xl backdrop-blur-xl">
+      <div className="w-full max-w-md bg-slate-900/80 border border-slate-800 rounded-xl p-6 sm:p-8 space-y-6">
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-mono font-medium mb-1">
-            <Sparkles className="w-3.5 h-3.5" />
-            Direct Database Authentication
-          </div>
           <div className="font-display text-2xl font-extrabold tracking-wider bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 bg-clip-text text-transparent">
             LYRICAL
           </div>
-          <h1 className="text-xl font-bold text-white">Sign in to your console</h1>
+          <h1 className="text-xl font-semibold text-white">Sign in to your hosting console</h1>
           <p className="text-xs text-slate-400">
-            Enter your registered email and password to access your WhatsApp bot hosting environment
+            Deploy, monitor, and manage real-time WhatsApp bot instances backed by Firebase & Cloud Firestore
           </p>
         </div>
 
         {error && (
-          <div className="p-3.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-xs text-rose-200 flex items-start gap-2.5">
-            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-            <span className="leading-relaxed">{error}</span>
+          <div className="p-3 rounded-lg bg-rose-950/60 border border-rose-500/40 text-xs text-rose-200 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{error}</span>
           </div>
         )}
 
+        {showProviderGuide && (
+          <div className="p-3.5 rounded-lg bg-cyan-950/50 border border-cyan-500/40 text-xs text-cyan-200 space-y-1.5">
+            <div className="font-semibold flex items-center gap-1.5 text-cyan-300">
+              <Info className="w-4 h-4 shrink-0" />
+              Enable Firebase Email/Password Sign-In
+            </div>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              To enable native Firebase Email/Password authentication alongside your LYRICAL session: open the Firebase Console → Authentication → Sign-in method → Email/Password → Enable and Save.
+            </p>
+          </div>
+        )}
+
+        <div className="space-y-2.5">
+          <GoogleSignInButton onClick={handleGoogleLogin} disabled={loading} />
+          <GithubSignInButton onClick={handleGithubLogin} disabled={loading} />
+        </div>
+
+        <div className="relative flex py-1 items-center">
+          <div className="flex-grow border-t border-slate-800"></div>
+          <span className="flex-shrink mx-3 text-xs text-slate-500">or continue with Email / Password</span>
+          <div className="flex-grow border-t border-slate-800"></div>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5 flex items-center gap-1.5">
-              <Mail className="w-3.5 h-3.5 text-slate-400" />
-              Email Address
-            </label>
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">Email Address</label>
             <input
               type="email"
               required
-              autoFocus
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
-              className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-colors"
+              className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
             />
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
-                <Lock className="w-3.5 h-3.5 text-slate-400" />
-                Password
-              </label>
+              <label className="block text-xs font-medium text-slate-300">Password</label>
               <Link to="/forgot-password" className="text-xs text-cyan-400 hover:underline">
                 Forgot password?
               </Link>
             </div>
-            <div className="relative">
-              <input
-                type={showPassword ? 'text' : 'password'}
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full pl-3.5 pr-10 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-colors"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
-              >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between text-xs text-slate-400 pt-1">
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="w-3.5 h-3.5 rounded border-slate-800 bg-slate-950 accent-cyan-500"
-              />
-              Remember me on this browser
-            </label>
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+            />
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 px-4 text-sm font-semibold rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 hover:from-cyan-400 hover:to-blue-500 transition-all shadow-lg shadow-cyan-500/20 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
+            className="w-full py-2.5 px-4 text-sm font-semibold rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 hover:from-cyan-400 hover:to-blue-500 transition-all disabled:opacity-50"
           >
-            {loading ? (
-              <span className="flex items-center gap-2">
-                <span className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                Signing in...
-              </span>
-            ) : (
-              <>
-                <span>Sign In to Workspace</span>
-                <ArrowRight className="w-4 h-4" />
-              </>
-            )}
+            {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
 
-        <div className="pt-4 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
+        <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
           <span>
-            Don't have an account?{' '}
-            <Link to="/register" className="text-cyan-400 font-semibold hover:underline">
+            New to LYRICAL?{' '}
+            <Link to="/register" className="text-cyan-400 font-medium hover:underline">
               Create account
             </Link>
           </span>
-          <Link to="/admin/login" className="text-purple-400 hover:underline flex items-center gap-1">
-            <Shield className="w-3 h-3" />
+          <Link to="/admin/login" className="text-purple-400 hover:underline">
             Admin Portal
           </Link>
         </div>
@@ -172,65 +270,33 @@ export const RegisterPage: React.FC<AuthProps> = ({ onAuthenticated }) => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Real-time password strength calculation
-  const getPasswordStrength = () => {
-    if (!password) return { score: 0, label: '', color: 'bg-slate-700' };
-    let score = 0;
-    if (password.length >= 6) score += 1;
-    if (password.length >= 8) score += 1;
-    if (/[0-9]/.test(password)) score += 1;
-    if (/[^A-Za-z0-9]/.test(password) || /[A-Z]/.test(password)) score += 1;
-
-    switch (score) {
-      case 1:
-        return { score: 1, label: 'Weak', color: 'bg-rose-500' };
-      case 2:
-        return { score: 2, label: 'Fair', color: 'bg-amber-500' };
-      case 3:
-        return { score: 3, label: 'Good', color: 'bg-cyan-500' };
-      case 4:
-        return { score: 4, label: 'Strong', color: 'bg-emerald-500' };
-      default:
-        return { score: 1, label: 'Weak', color: 'bg-rose-500' };
-    }
-  };
-
-  const strength = getPasswordStrength();
-  const passwordsMatch = confirmPassword.length > 0 && password === confirmPassword;
-  const passwordsMismatch = confirmPassword.length > 0 && password !== confirmPassword;
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-
-    const cleanEmail = email.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      setError('Please provide a valid email address.');
-      return;
-    }
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters long.');
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError('Passwords do not match. Please ensure both fields are identical.');
-      return;
-    }
-
     setLoading(true);
+    setError(null);
     try {
+      // Register in Firebase Auth + Firestore if Email/Password provider is enabled
+      try {
+        await firebaseRegisterEmailPassword(email, password, name);
+      } catch (fbErr: any) {
+        if (fbErr?.code === 'auth/weak-password') {
+          setError('Password should be at least 6 characters.');
+          setLoading(false);
+          return;
+        }
+        if (fbErr?.code === 'auth/invalid-email') {
+          setError('Please enter a valid email address.');
+          setLoading(false);
+          return;
+        }
+        // If auth/operation-not-allowed or auth/email-already-in-use, proceed to backend sync
+      }
       const res = await apiRequest<{ token: string; user: User }>('/api/auth/register', {
         method: 'POST',
-        body: JSON.stringify({
-          name: name.trim(),
-          email: cleanEmail,
-          password,
-        }),
+        body: JSON.stringify({ name, email, password }),
       });
       setStoredSessionToken(res.token);
       onAuthenticated(res.user);
@@ -242,56 +308,105 @@ export const RegisterPage: React.FC<AuthProps> = ({ onAuthenticated }) => {
     }
   };
 
+  const handleGoogleSignUp = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await googleSignIn();
+      if (result && result.user.email) {
+        const res = await apiRequest<{ token: string; user: User }>('/api/auth/google-sync', {
+          method: 'POST',
+          body: JSON.stringify({
+            email: result.user.email,
+            name: result.user.displayName || result.user.email.split('@')[0],
+          }),
+        });
+        setStoredSessionToken(res.token);
+        onAuthenticated(res.user);
+        navigate('/dashboard');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Google sign-in failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGithubSignUp = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await githubSignIn();
+      if (result && result.email) {
+        const res = await apiRequest<{ token: string; user: User }>('/api/auth/google-sync', {
+          method: 'POST',
+          body: JSON.stringify({
+            email: result.email,
+            name: result.githubUsername || 'GitHub Developer',
+          }),
+        });
+        setStoredSessionToken(res.token);
+        onAuthenticated(res.user);
+        navigate('/dashboard');
+      }
+    } catch (err: any) {
+      if (err?.code === 'auth/operation-not-allowed') {
+        setError('Enable the GitHub provider in Firebase Console → Authentication → Sign-in method → GitHub.');
+      } else {
+        setError(err.message || 'GitHub sign-in failed.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4">
-      {/* Background Glow */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
-
-      <div className="relative w-full max-w-md bg-slate-900/80 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-6 shadow-2xl backdrop-blur-xl">
+      <div className="w-full max-w-md bg-slate-900/80 border border-slate-800 rounded-xl p-6 sm:p-8 space-y-6">
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-mono font-medium mb-1">
-            <Sparkles className="w-3.5 h-3.5" />
-            Instant Real-Time Signup
-          </div>
           <div className="font-display text-2xl font-extrabold tracking-wider bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 bg-clip-text text-transparent">
             LYRICAL
           </div>
-          <h1 className="text-xl font-bold text-white">Create your account</h1>
+          <h1 className="text-xl font-semibold text-white">Create your LYRICAL account</h1>
           <p className="text-xs text-slate-400">
-            Deploy and manage 24/7 WhatsApp multi-device bots with dedicated container storage
+            Launch production WhatsApp bots with Firestore persistence and Google Drive backups
           </p>
         </div>
 
         {error && (
-          <div className="p-3.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-xs text-rose-200 flex items-start gap-2.5">
-            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-            <span className="leading-relaxed">{error}</span>
+          <div className="p-3 rounded-lg bg-rose-950/60 border border-rose-500/40 text-xs text-rose-200 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{error}</span>
           </div>
         )}
 
+        <div className="space-y-2.5">
+          <GoogleSignInButton onClick={handleGoogleSignUp} disabled={loading} />
+          <GithubSignInButton onClick={handleGithubSignUp} disabled={loading} />
+        </div>
+
+        <div className="relative flex py-1 items-center">
+          <div className="flex-grow border-t border-slate-800"></div>
+          <span className="flex-shrink mx-3 text-xs text-slate-500">or register with Email / Password</span>
+          <div className="flex-grow border-t border-slate-800"></div>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5 flex items-center gap-1.5">
-              <UserIcon className="w-3.5 h-3.5 text-slate-400" />
-              Full Name
-            </label>
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">Full Name</label>
             <input
               type="text"
               required
-              autoFocus
               maxLength={80}
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Alex Mercer"
-              className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-colors"
+              placeholder="Alex Mercer"
+              className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5 flex items-center gap-1.5">
-              <Mail className="w-3.5 h-3.5 text-slate-400" />
-              Email Address
-            </label>
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">Email Address</label>
             <input
               type="email"
               required
@@ -299,112 +414,37 @@ export const RegisterPage: React.FC<AuthProps> = ({ onAuthenticated }) => {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
-              className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-colors"
+              className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
             />
-            <p className="text-[11px] text-slate-500 mt-1">
-              Used to log in to your account. Each user must have a unique email.
-            </p>
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
-                <Lock className="w-3.5 h-3.5 text-slate-400" />
-                Password (minimum 6 characters)
-              </label>
-              {password.length > 0 && (
-                <span className="text-[10px] font-mono text-slate-400">{strength.label}</span>
-              )}
-            </div>
-            <div className="relative">
-              <input
-                type={showPassword ? 'text' : 'password'}
-                required
-                minLength={6}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Choose a strong password"
-                className="w-full pl-3.5 pr-10 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-colors"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
-              >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-
-            {/* Real-time strength bars */}
-            {password.length > 0 && (
-              <div className="flex items-center gap-1.5 mt-2">
-                {[1, 2, 3, 4].map((level) => (
-                  <div
-                    key={level}
-                    className={`h-1 flex-1 rounded-full transition-all duration-300 ${
-                      strength.score >= level ? strength.color : 'bg-slate-800'
-                    }`}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
-                <Lock className="w-3.5 h-3.5 text-slate-400" />
-                Confirm Password
-              </label>
-              {passwordsMatch && (
-                <span className="text-[11px] text-emerald-400 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" />
-                  Passwords match
-                </span>
-              )}
-              {passwordsMismatch && (
-                <span className="text-[11px] text-rose-400">Passwords do not match</span>
-              )}
-            </div>
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">
+              Password (minimum 6 characters)
+            </label>
             <input
-              type={showPassword ? 'text' : 'password'}
+              type="password"
               required
               minLength={6}
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="Re-enter your password"
-              className={`w-full px-3.5 py-2.5 text-sm bg-slate-950 border rounded-xl text-white placeholder-slate-500 focus:outline-none transition-colors ${
-                passwordsMismatch
-                  ? 'border-rose-500 focus:border-rose-500'
-                  : passwordsMatch
-                  ? 'border-emerald-500/70 focus:border-emerald-500'
-                  : 'border-slate-800 focus:border-cyan-500'
-              }`}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
             />
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 px-4 text-sm font-semibold rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 hover:from-cyan-400 hover:to-blue-500 transition-all shadow-lg shadow-cyan-500/20 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer pt-3"
+            className="w-full py-2.5 px-4 text-sm font-semibold rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 hover:from-cyan-400 hover:to-blue-500 transition-all disabled:opacity-50"
           >
-            {loading ? (
-              <span className="flex items-center gap-2">
-                <span className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                Creating account...
-              </span>
-            ) : (
-              <>
-                <span>Create Account & Continue</span>
-                <ArrowRight className="w-4 h-4" />
-              </>
-            )}
+            {loading ? 'Creating account...' : 'Create Account'}
           </button>
         </form>
 
-        <div className="pt-4 border-t border-slate-800 text-center text-xs text-slate-400">
+        <div className="pt-2 border-t border-slate-800 text-center text-xs text-slate-400">
           Already have an account?{' '}
-          <Link to="/login" className="text-cyan-400 font-semibold hover:underline">
+          <Link to="/login" className="text-cyan-400 font-medium hover:underline">
             Sign In
           </Link>
         </div>
@@ -426,6 +466,13 @@ export const ForgotPasswordPage: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
+      if (step === 1) {
+        try {
+          await firebaseResetPasswordEmail(email);
+        } catch {
+          // also trigger backend recovery flow
+        }
+      }
       const res = await apiRequest('/api/auth/forgot-password', {
         method: 'POST',
         body: JSON.stringify(
@@ -435,7 +482,7 @@ export const ForgotPasswordPage: React.FC = () => {
       setMessage(res.message);
       if (step === 1) setStep(2);
     } catch (err: any) {
-      setError(err.message || 'Password reset could not be completed.');
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -443,25 +490,24 @@ export const ForgotPasswordPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4">
-      <div className="w-full max-w-md bg-slate-900/80 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-6 shadow-2xl">
+      <div className="w-full max-w-md bg-slate-900/80 border border-slate-800 rounded-xl p-6 sm:p-8 space-y-6">
         <div className="text-center space-y-2">
           <div className="font-display text-2xl font-extrabold tracking-wider bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 bg-clip-text text-transparent">
             LYRICAL
           </div>
-          <h1 className="text-xl font-bold text-white">Password Recovery</h1>
+          <h1 className="text-xl font-semibold text-white">Account Password Recovery</h1>
           <p className="text-xs text-slate-400">
-            Enter your account email to configure a new password directly
+            Verify your account email to configure a new password
           </p>
         </div>
 
         {error && (
-          <div className="p-3.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-xs text-rose-200 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-            <span>{error}</span>
+          <div className="p-3 rounded-lg bg-rose-950/60 border border-rose-500/40 text-xs text-rose-200">
+            {error}
           </div>
         )}
         {message && (
-          <div className="p-3.5 rounded-xl bg-cyan-950/60 border border-cyan-500/40 text-xs text-cyan-200 flex items-center gap-2">
+          <div className="p-3 rounded-lg bg-cyan-950/60 border border-cyan-500/40 text-xs text-cyan-200 flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />
             <span>{message}</span>
           </div>
@@ -476,7 +522,7 @@ export const ForgotPasswordPage: React.FC = () => {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
-              className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+              className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
             />
           </div>
 
@@ -492,7 +538,7 @@ export const ForgotPasswordPage: React.FC = () => {
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
               />
             </div>
           )}
@@ -500,9 +546,13 @@ export const ForgotPasswordPage: React.FC = () => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 px-4 text-sm font-semibold rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 hover:from-cyan-400 hover:to-blue-500 transition-all disabled:opacity-50"
+            className="w-full py-2.5 px-4 text-sm font-semibold rounded-lg bg-cyan-500 text-slate-950 hover:bg-cyan-400 transition-colors"
           >
-            {loading ? 'Processing...' : step === 1 ? 'Verify Email' : 'Save New Password'}
+            {loading
+              ? 'Processing...'
+              : step === 1
+              ? 'Send Recovery & Verify Email'
+              : 'Reset Password'}
           </button>
         </form>
 
@@ -531,7 +581,7 @@ export const AdminLoginPage: React.FC<AuthProps> = ({ onAuthenticated }) => {
     try {
       const res = await apiRequest<{ token: string; user: User }>('/api/auth/admin-login', {
         method: 'POST',
-        body: JSON.stringify({ email: email.trim().toLowerCase(), password, adminSecret }),
+        body: JSON.stringify({ email, password, adminSecret }),
       });
       setStoredSessionToken(res.token);
       onAuthenticated(res.user);
@@ -543,30 +593,64 @@ export const AdminLoginPage: React.FC<AuthProps> = ({ onAuthenticated }) => {
     }
   };
 
+  const handleGoogleAdmin = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await googleSignIn();
+      if (result && result.user.email) {
+        const res = await apiRequest<{ token: string; user: User }>('/api/auth/google-sync', {
+          method: 'POST',
+          body: JSON.stringify({
+            email: result.user.email,
+            name: result.user.displayName || 'Administrator',
+          }),
+        });
+        if (res.user.role !== 'admin') {
+          setError('Your Google account is not authorized as a platform administrator.');
+          return;
+        }
+        setStoredSessionToken(res.token);
+        onAuthenticated(res.user);
+        navigate('/admin');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Google administrator sign-in failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4">
-      <div className="w-full max-w-md bg-slate-900/90 border border-purple-500/40 rounded-2xl p-6 sm:p-8 space-y-6 shadow-2xl backdrop-blur-xl">
+      <div className="w-full max-w-md bg-slate-900/90 border border-purple-500/40 rounded-xl p-6 sm:p-8 space-y-6">
         <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-400 mb-1">
+          <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-purple-500/15 border border-purple-500/30 text-purple-400 mb-1">
             <Shield className="w-5 h-5" />
           </div>
-          <h1 className="text-xl font-bold text-white">Administrator Portal</h1>
+          <h1 className="text-xl font-semibold text-white">LYRICAL Administrator Portal</h1>
           <p className="text-xs text-slate-400">
-            System administration & infrastructure governance console
+            Restricted access. All administrative logins are recorded in the security audit trail.
           </p>
         </div>
 
         {error && (
-          <div className="p-3.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-xs text-rose-200 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-            <span>{error}</span>
+          <div className="p-3 rounded-lg bg-rose-950/60 border border-rose-500/40 text-xs text-rose-200">
+            {error}
           </div>
         )}
 
+        <GoogleSignInButton onClick={handleGoogleAdmin} disabled={loading} />
+
+        <div className="relative flex py-1 items-center">
+          <div className="flex-grow border-t border-slate-800"></div>
+          <span className="flex-shrink mx-3 text-xs text-slate-500">or administrator credentials</span>
+          <div className="flex-grow border-t border-slate-800"></div>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5 flex items-center gap-1.5">
-              <Mail className="w-3.5 h-3.5 text-slate-400" />
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">
               Administrator Email
             </label>
             <input
@@ -574,41 +658,40 @@ export const AdminLoginPage: React.FC<AuthProps> = ({ onAuthenticated }) => {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-purple-500"
+              className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-lg text-white focus:outline-none focus:border-purple-500"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5 flex items-center gap-1.5">
-              <Lock className="w-3.5 h-3.5 text-slate-400" />
-              Password (or Initial Admin Key: LyricalAdmin2026!)
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">
+              Password (or Default Admin Key: LyricalAdmin2026!)
             </label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter administrator password..."
-              className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-purple-500"
+              placeholder="Enter admin password..."
+              className="w-full px-3.5 py-2.5 text-sm bg-slate-950 border border-slate-800 rounded-lg text-white focus:outline-none focus:border-purple-500"
             />
           </div>
 
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1.5">
-              Optional ADMIN_SECRET Token
+              Optional ADMIN_SECRET Override
             </label>
             <input
               type="password"
               value={adminSecret}
               onChange={(e) => setAdminSecret(e.target.value)}
-              placeholder="Optional master secret..."
-              className="w-full px-3.5 py-2 text-xs font-mono bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-purple-500"
+              placeholder="Optional secret token..."
+              className="w-full px-3.5 py-2 text-xs font-mono bg-slate-950 border border-slate-800 rounded-lg text-white focus:outline-none focus:border-purple-500"
             />
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 px-4 text-sm font-semibold rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-500 hover:to-blue-500 transition-all shadow-lg shadow-purple-500/20"
+            className="w-full py-2.5 px-4 text-sm font-semibold rounded-lg bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-500 hover:to-blue-500 transition-all"
           >
             {loading ? 'Authenticating...' : 'Enter Administrator Console'}
           </button>
@@ -616,7 +699,7 @@ export const AdminLoginPage: React.FC<AuthProps> = ({ onAuthenticated }) => {
 
         <div className="text-center text-xs text-slate-400">
           <Link to="/login" className="text-cyan-400 hover:underline">
-            Return to User Sign In
+            Return to Standard User Login
           </Link>
         </div>
       </div>

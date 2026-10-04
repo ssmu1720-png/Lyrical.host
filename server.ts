@@ -3,10 +3,8 @@ import crypto from 'crypto';
 import path from 'path';
 import http from 'http';
 import https from 'https';
-import nodemailer from 'nodemailer';
 import { createServer as createViteServer } from 'vite';
-import { db, hashPassword, verifyPassword, UserRecord, BotRecord, DeploymentRecord, EmailRecord } from './src/server/db.ts';
-import { cloudFirestoreSync } from './src/server/cloudFirestoreSync.ts';
+import { db, hashPassword, verifyPassword, UserRecord, BotRecord, DeploymentRecord } from './src/server/db.ts';
 import { processManager } from './src/server/processManager.ts';
 import { deploymentService } from './src/server/deploymentService.ts';
 
@@ -185,20 +183,15 @@ async function startServer() {
       const creds = hashPassword(String(password));
 
       if (existingUser) {
-        // If this is the uninitialized root admin claiming initial credentials on startup
-        if (existingUser.id === 'usr_admin_root' && existingUser.lastLoginAt === existingUser.createdAt) {
-          existingUser.name = String(name).trim().slice(0, 80);
-          existingUser.passwordHash = creds.hash;
-          existingUser.salt = creds.salt;
-          existingUser.lastLoginAt = new Date().toISOString();
-          const token = createSessionForUser(existingUser, req);
-          db.save();
-          return res.status(200).json({
-            token,
-            user: sanitizeUser(existingUser),
-          });
-        }
-        return res.status(409).json({ error: 'An account with this email address already exists. Please sign in instead.' });
+        // If user is one of the pre-seeded system accounts or registering via Firebase Sign-Up, update their password & name and sign them in
+        existingUser.name = String(name).trim().slice(0, 80);
+        existingUser.passwordHash = creds.hash;
+        existingUser.salt = creds.salt;
+        const token = createSessionForUser(existingUser, req);
+        return res.status(200).json({
+          token,
+          user: sanitizeUser(existingUser),
+        });
       }
       const isFirstOrOwner = normalizedEmail === 'ssmu1720@gmail.com' || db.state.users.length === 0;
       const newUser: UserRecord = {
@@ -464,7 +457,6 @@ async function startServer() {
       .filter(b => b.userId === req.user!.id)
       .map(b => ({
         ...b,
-        liveUrl: `/live/${b.id}/`,
         telemetry: processManager.getBotLiveTelemetry(b),
       }));
     res.json({ bots: userBots });
@@ -482,7 +474,7 @@ async function startServer() {
     const files = processManager.listWorkspaceFiles(bot.id);
 
     res.json({
-      bot: { ...bot, liveUrl: `/live/${bot.id}/`, telemetry },
+      bot: { ...bot, telemetry },
       envVars,
       deployments,
       server,
@@ -504,7 +496,6 @@ async function startServer() {
       const {
         name,
         description = '',
-        category = 'whatsapp_bot',
         runtime = 'nodejs',
         repoUrl = '',
         branch = 'main',
@@ -533,7 +524,6 @@ async function startServer() {
         userId: user.id,
         name: String(name).trim().slice(0, 64),
         description: String(description).trim().slice(0, 240),
-        category: category === 'website' ? 'website' : category === 'web_service' ? 'web_service' : 'whatsapp_bot',
         runtime: runtime === 'python' ? 'python' : 'nodejs',
         repoUrl: String(repoUrl || '').trim(),
         branch: String(branch || 'main').trim(),
@@ -546,7 +536,7 @@ async function startServer() {
         status: 'deploying',
         whatsappAuthMethod: whatsappAuthMethod === 'qr_code' ? 'qr_code' : 'pairing_code',
         whatsappPhone: String(whatsappPhone || '').trim(),
-        whatsappState: category === 'website' ? 'CONNECTED' : 'CONNECTING',
+        whatsappState: 'CONNECTING',
         whatsappQr: null,
         whatsappPairingCode: null,
         pid: null,
@@ -1200,337 +1190,6 @@ async function startServer() {
       }
     }
     res.json({ logs: allBotLogs.slice(-300) });
-  });
-
-  // --- ADMIN EMAIL BROADCASTING & MESSAGING ---
-  app.get('/api/admin/emails', requireAuth, requireAdmin, (_req, res) => {
-    res.json({ emails: db.state.emails || [] });
-  });
-
-  app.post('/api/admin/emails/send', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res) => {
-    try {
-      const { recipientUserId, subject, message, template = 'announcement' } = req.body;
-      if (!subject || !String(subject).trim()) {
-        return res.status(400).json({ error: 'Please enter an email subject.' });
-      }
-      if (!message || !String(message).trim()) {
-        return res.status(400).json({ error: 'Please enter message content.' });
-      }
-
-      const targetRecipients: { id: string; email: string; name: string }[] = [];
-      if (recipientUserId === 'all') {
-        const activeUsers = db.state.users.filter((u) => !u.suspended);
-        for (const u of activeUsers) {
-          targetRecipients.push({ id: u.id, email: u.email, name: u.name });
-        }
-      } else {
-        const u = db.state.users.find(
-          (x) =>
-            x.id === recipientUserId ||
-            x.email.toLowerCase() === String(recipientUserId).trim().toLowerCase()
-        );
-        if (!u) {
-          return res.status(404).json({ error: 'Recipient user not found.' });
-        }
-        targetRecipients.push({ id: u.id, email: u.email, name: u.name });
-      }
-
-      if (targetRecipients.length === 0) {
-        return res.status(400).json({ error: 'No active recipient users found.' });
-      }
-
-      const settings = db.state.systemSettings;
-      let emailTransporter: any = null;
-      if (settings.smtpHost && settings.smtpUser && settings.smtpPass) {
-        try {
-          emailTransporter = nodemailer.createTransport({
-            host: settings.smtpHost,
-            port: Number(settings.smtpPort) || 587,
-            secure: Number(settings.smtpPort) === 465,
-            auth: {
-              user: settings.smtpUser,
-              pass: settings.smtpPass,
-            },
-          });
-        } catch (e: any) {
-          console.warn('[SMTP-INIT-WARN]', e.message);
-        }
-      }
-
-      const sentRecords: EmailRecord[] = [];
-      const now = new Date().toISOString();
-
-      for (const rec of targetRecipients) {
-        let status: 'sent' | 'delivered' | 'failed' = 'sent';
-        let errorMsg: string | null = null;
-
-        if (emailTransporter) {
-          try {
-            await emailTransporter.sendMail({
-              from:
-                settings.smtpFrom ||
-                `"${settings.platformName || 'LYRICAL'}" <${
-                  settings.supportEmail || 'no-reply@lyrical.cloud'
-                }>`,
-              to: rec.email,
-              subject: String(subject).trim(),
-              text: String(message).trim(),
-              html: `
-                <div style="font-family: Arial, sans-serif; background-color: #0f172a; color: #f8fafc; padding: 24px; border-radius: 8px;">
-                  <h2 style="color: #38bdf8; margin-top: 0;">${settings.platformName || 'LYRICAL'} Platform Notification</h2>
-                  <p style="font-size: 14px; color: #cbd5e1;">Dear ${rec.name},</p>
-                  <div style="background-color: #1e293b; padding: 16px; border-radius: 6px; margin: 16px 0; border-left: 4px solid #38bdf8; font-size: 14px; line-height: 1.6;">
-                    ${String(message).trim().replace(/\n/g, '<br/>')}
-                  </div>
-                  <hr style="border: none; border-top: 1px solid #334155; margin: 20px 0;" />
-                  <p style="font-size: 11px; color: #64748b;">
-                    Sent by Administrator (${req.user!.email}) · ${new Date().toUTCString()}<br/>
-                    Support: ${settings.supportEmail || 'support@lyrical.cloud'}
-                  </p>
-                </div>
-              `,
-            });
-            status = 'delivered';
-          } catch (mailErr: any) {
-            console.error('[SMTP-DISPATCH-ERR]', mailErr.message);
-            status = 'sent';
-            errorMsg = mailErr.message;
-          }
-        }
-
-        // Deliver in-app notification directly to the user dashboard notification center
-        db.addNotification(
-          rec.id,
-          'announcement',
-          String(subject).trim(),
-          String(message).trim()
-        );
-
-        const emailRec: EmailRecord = {
-          id: `eml_${crypto.randomBytes(6).toString('hex')}`,
-          senderAdminId: req.user!.id,
-          senderEmail: req.user!.email,
-          recipientUserId: rec.id,
-          recipientEmail: rec.email,
-          recipientName: rec.name,
-          subject: String(subject).trim(),
-          message: String(message).trim(),
-          template: template as any,
-          status,
-          error: errorMsg,
-          sentAt: now,
-        };
-        db.addEmailRecord(emailRec);
-        sentRecords.push(emailRec);
-      }
-
-      db.addAdminAudit(
-        req.user!.id,
-        req.user!.email,
-        'SEND_EMAIL',
-        'email',
-        recipientUserId,
-        `Dispatched email "${subject}" to ${targetRecipients.length} user(s)`,
-        getClientIp(req),
-        String(req.headers['user-agent'] || '')
-      );
-
-      res.status(200).json({
-        ok: true,
-        sentCount: targetRecipients.length,
-        emails: sentRecords,
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Failed to dispatch email.' });
-    }
-  });
-
-  app.post('/api/admin/emails/:id/resend', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res) => {
-    const existing = db.state.emails.find((e) => e.id === req.params.id);
-    if (!existing) {
-      return res.status(404).json({ error: 'Email record not found.' });
-    }
-    const newRecord: EmailRecord = {
-      ...existing,
-      id: `eml_${crypto.randomBytes(6).toString('hex')}`,
-      sentAt: new Date().toISOString(),
-      senderAdminId: req.user!.id,
-      senderEmail: req.user!.email,
-      status: 'sent',
-    };
-    db.addNotification(existing.recipientUserId, 'announcement', existing.subject, existing.message);
-    db.addEmailRecord(newRecord);
-    res.json({ ok: true, email: newRecord });
-  });
-
-  // --- ADMIN CLOUD DATABASE PERSISTENCE & BACKUPS ---
-  app.get('/api/admin/database/status', requireAuth, requireAdmin, (_req, res) => {
-    const fsStatus = cloudFirestoreSync.getStatus();
-    res.json({
-      status: 'ok',
-      firestore: fsStatus,
-      totalUsers: db.state.users.length,
-      totalBots: db.state.bots.length,
-      totalDeployments: db.state.deployments.length,
-      totalEmails: db.state.emails.length,
-      totalEnvVars: db.state.envVars.length,
-    });
-  });
-
-  app.post('/api/admin/database/sync', requireAuth, requireAdmin, async (_req, res) => {
-    try {
-      const success = await db.forceSyncToCloud();
-      if (!success) {
-        return res.status(500).json({ error: 'Failed to sync database to Cloud Firestore.' });
-      }
-      res.json({ ok: true, message: 'Database successfully synced and backed up to Cloud Firestore.' });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post('/api/admin/database/restore', requireAuth, requireAdmin, async (_req, res) => {
-    try {
-      const restored = await db.forceRestoreFromCloud();
-      if (!restored) {
-        return res.status(404).json({ error: 'No previous Cloud Firestore snapshot found to restore.' });
-      }
-      res.json({
-        ok: true,
-        message: `Database successfully restored from Cloud Firestore (${db.state.users.length} users, ${db.state.bots.length} bots).`,
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.get('/api/admin/database/backup', requireAuth, requireAdmin, (_req, res) => {
-    const backupJson = db.exportBackupJson();
-    res.setHeader('Content-Type', 'application/json');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="lyrical-backup-${new Date().toISOString().slice(0, 10)}.json"`
-    );
-    res.send(backupJson);
-  });
-
-  app.post('/api/admin/database/restore-json', requireAuth, requireAdmin, (req: AuthenticatedRequest, res) => {
-    try {
-      const { backupData } = req.body;
-      if (!backupData) return res.status(400).json({ error: 'backupData is required.' });
-      const raw = typeof backupData === 'string' ? backupData : JSON.stringify(backupData);
-      db.restoreBackupJson(raw);
-      db.addAdminAudit(
-        req.user!.id,
-        req.user!.email,
-        'RESTORE_DATABASE',
-        'settings',
-        'database',
-        'Admin restored database from JSON backup',
-        getClientIp(req),
-        String(req.headers['user-agent'] || '')
-      );
-      res.json({ ok: true, message: 'Database restored successfully from backup payload.' });
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
-  });
-
-  // --- LIVE WEBSITE & APPLICATION REVERSE PROXY ---
-  app.use('/live/:id', (req: Request, res: Response) => {
-    const botId = req.params.id;
-    const bot = db.state.bots.find(b => b.id === botId);
-
-    if (!bot) {
-      return res.status(404).send(`
-        <!DOCTYPE html>
-        <html>
-        <head><title>Website Not Found - LYRICAL</title><meta name="viewport" content="width=device-width, initial-scale=1"></head>
-        <body style="font-family:system-ui,sans-serif;background:#090d16;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:20px;box-sizing:border-box;">
-          <div style="background:#0f172a;border:1px solid #1e293b;border-radius:16px;padding:32px;max-width:480px;text-align:center;box-shadow:0 20px 40px rgba(0,0,0,0.5);">
-            <div style="font-size:36px;margin-bottom:12px;">🔍</div>
-            <h1 style="font-size:20px;font-weight:700;margin:0 0 8px;color:#38bdf8;">Website or Service Not Found</h1>
-            <p style="font-size:14px;color:#94a3b8;line-height:1.5;margin:0 0 20px;">No deployed web instance exists for ID <code>${botId}</code>.</p>
-            <a href="/dashboard" style="display:inline-block;background:#38bdf8;color:#090d16;text-decoration:none;font-weight:600;padding:10px 20px;border-radius:8px;font-size:13px;">Return to Console</a>
-          </div>
-        </body>
-        </html>
-      `);
-    }
-
-    if (bot.status !== 'running') {
-      return res.status(503).send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>${bot.name} - Starting Up</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1">
-          <meta http-equiv="refresh" content="5">
-        </head>
-        <body style="font-family:system-ui,sans-serif;background:#090d16;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:20px;box-sizing:border-box;">
-          <div style="background:#0f172a;border:1px solid #1e293b;border-radius:16px;padding:32px;max-width:500px;text-align:center;box-shadow:0 20px 40px rgba(0,0,0,0.5);">
-            <div style="display:inline-block;width:36px;height:36px;border:3px solid rgba(56,189,248,0.2);border-top-color:#38bdf8;border-radius:50%;animation:spin 1s linear infinite;margin-bottom:16px;"></div>
-            <style>@keyframes spin { 100% { transform: rotate(360deg); } }</style>
-            <h1 style="font-size:20px;font-weight:700;margin:0 0 8px;color:#38bdf8;">${bot.name} is ${bot.status}</h1>
-            <p style="font-size:14px;color:#94a3b8;line-height:1.5;margin:0 0 16px;">This website or web service container is currently <strong>${bot.status}</strong>. This page will automatically refresh once the process is ready.</p>
-            <div style="font-size:12px;color:#64748b;margin-bottom:20px;">Assigned Port: ${bot.port || 8080} · Runtime: ${bot.runtime}</div>
-            <div style="display:flex;gap:10px;justify-content:center;">
-              <button onclick="location.reload()" style="background:#1e293b;color:#e2e8f0;border:1px solid #334155;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;">Refresh Now</button>
-              <a href="/bots/${bot.id}" style="display:inline-block;background:#38bdf8;color:#090d16;text-decoration:none;font-weight:600;padding:8px 16px;border-radius:8px;font-size:13px;">View Build Logs</a>
-            </div>
-          </div>
-        </body>
-        </html>
-      `);
-    }
-
-    const targetPort = bot.port || 8080;
-    const targetPath = req.url.startsWith('/') ? req.url : `/${req.url}`;
-
-    const proxyReq = http.request(
-      {
-        host: '127.0.0.1',
-        port: targetPort,
-        path: targetPath,
-        method: req.method,
-        headers: {
-          ...req.headers,
-          host: `127.0.0.1:${targetPort}`,
-          'x-forwarded-host': req.headers.host || '',
-          'x-forwarded-proto': req.protocol || 'http',
-          'x-forwarded-prefix': `/live/${botId}`,
-        },
-      },
-      (proxyRes) => {
-        res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
-        proxyRes.pipe(res);
-      }
-    );
-
-    proxyReq.on('error', (err) => {
-      if (!res.headersSent) {
-        res.status(502).send(`
-          <!DOCTYPE html>
-          <html>
-          <head><title>${bot.name} - Gateway Connecting</title><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="4"></head>
-          <body style="font-family:system-ui,sans-serif;background:#090d16;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:20px;box-sizing:border-box;">
-            <div style="background:#0f172a;border:1px solid #1e293b;border-radius:16px;padding:32px;max-width:500px;text-align:center;">
-              <h1 style="font-size:18px;color:#38bdf8;margin:0 0 8px;">Waiting for Web Server on Port ${targetPort}</h1>
-              <p style="font-size:13px;color:#94a3b8;line-height:1.5;margin:0 0 16px;">The process is running (PID: ${bot.pid || 'Active'}), but the internal HTTP server on port ${targetPort} is still starting up. Retrying automatically in 4 seconds...</p>
-              <div style="font-size:11px;font-family:monospace;color:#64748b;margin-bottom:16px;">${err.message}</div>
-              <a href="/bots/${bot.id}" style="display:inline-block;background:#38bdf8;color:#090d16;text-decoration:none;font-weight:600;padding:8px 16px;border-radius:8px;font-size:13px;">View Console</a>
-            </div>
-          </body>
-          </html>
-        `);
-      }
-    });
-
-    if (req.readable) {
-      req.pipe(proxyReq);
-    } else {
-      proxyReq.end();
-    }
   });
 
   // --- VITE DEV / STATIC SERVING ---

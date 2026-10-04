@@ -10,8 +10,6 @@ import {
   Search,
   AlertTriangle,
   Cloud as FolderCloud,
-  Globe,
-  ExternalLink,
 } from 'lucide-react';
 import { apiRequest, Bot, Deployment, NotificationItem, formatUptime } from '../lib/api';
 import { GoogleDriveModal } from '../components/GoogleDriveModal';
@@ -539,18 +537,6 @@ export const BotsListPage: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {bot.status === 'running' && (
-                    <a
-                      href={`/live/${bot.id}/`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-cyan-500 text-slate-950 hover:bg-cyan-400 transition-colors inline-flex items-center gap-1 shadow-sm"
-                      title="Open Live Website / Preview"
-                    >
-                      <Globe className="w-3.5 h-3.5" />
-                      Live Site ↗
-                    </a>
-                  )}
                   <Link
                     to={`/bots/${bot.id}`}
                     className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/25"

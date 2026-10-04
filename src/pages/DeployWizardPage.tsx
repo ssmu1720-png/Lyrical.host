@@ -16,7 +16,6 @@ import {
   Search,
   RefreshCw,
   Cloud as FolderCloud,
-  Globe,
 } from 'lucide-react';
 import { apiRequest, Bot, Deployment } from '../lib/api';
 import {
@@ -27,7 +26,7 @@ import {
   getConnectedGithubUser,
   GithubRepoItem,
 } from '../lib/workspaceAuth';
-import { BOT_CATALOG, WEBSITE_CATALOG, CatalogBotItem } from '../lib/botCatalog';
+import { BOT_CATALOG, CatalogBotItem } from '../lib/botCatalog';
 import { TerminalLogViewer } from '../components/TerminalLogViewer';
 import { GoogleDriveModal } from '../components/GoogleDriveModal';
 
@@ -36,15 +35,9 @@ export const DeployWizardPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const preselectedBotId = searchParams.get('bot');
 
-  const [activeCatalogTab, setActiveCatalogTab] = useState<'bots' | 'websites'>('bots');
-
   const [selectedBot, setSelectedBot] = useState<CatalogBotItem | null>(() => {
     if (!preselectedBotId) return null;
-    return (
-      BOT_CATALOG.find((b) => b.id === preselectedBotId) ||
-      WEBSITE_CATALOG.find((b) => b.id === preselectedBotId) ||
-      null
-    );
+    return BOT_CATALOG.find((b) => b.id === preselectedBotId) || null;
   });
 
   // Configuration form fields matching the screenshot layout
@@ -115,7 +108,6 @@ export const DeployWizardPage: React.FC = () => {
     setGithubError(null);
     try {
       const authRes = await githubSignIn();
-      if (!authRes) return;
       setGithubConnectedUser({ login: authRes.githubUsername });
       const repos = await listUserGithubRepos();
       setGithubRepos(repos);
@@ -197,9 +189,7 @@ export const DeployWizardPage: React.FC = () => {
     e.preventDefault();
     if (!selectedBot) return;
 
-    const isWebsite = selectedBot.category === 'website';
-
-    if (!isWebsite && !ownerNumber.trim()) {
+    if (!ownerNumber.trim()) {
       setError('Please enter your WhatsApp OWNER_NUMBER (e.g. 254712345678).');
       return;
     }
@@ -219,40 +209,33 @@ export const DeployWizardPage: React.FC = () => {
 
     try {
       const ghToken = getGithubAccessToken();
-      const envPayload = isWebsite
-        ? [
-            { key: 'NODE_ENV', value: 'production' },
-            ...(ghToken ? [{ key: 'GITHUB_TOKEN', value: ghToken }] : []),
-          ]
-        : [
-            { key: 'SESSION_ID', value: sessionId.trim() },
-            { key: 'SESSION', value: sessionId.trim() },
-            { key: 'DEVICE_MODE', value: deviceMode.trim() || 'Android' },
-            { key: 'OWNER_NUMBER', value: ownerNumber.replace(/[^0-9]/g, '') },
-            { key: 'PREFIX', value: prefix.trim() || '.' },
-            { key: 'MODE', value: 'public' },
-            ...(ghToken ? [{ key: 'GITHUB_TOKEN', value: ghToken }] : []),
-          ];
+      const envPayload = [
+        { key: 'SESSION_ID', value: sessionId.trim() },
+        { key: 'SESSION', value: sessionId.trim() },
+        { key: 'DEVICE_MODE', value: deviceMode.trim() || 'Android' },
+        { key: 'OWNER_NUMBER', value: ownerNumber.replace(/[^0-9]/g, '') },
+        { key: 'PREFIX', value: prefix.trim() || '.' },
+        { key: 'MODE', value: 'public' },
+        ...(ghToken ? [{ key: 'GITHUB_TOKEN', value: ghToken }] : []),
+      ];
 
       // Assign a dynamic safe port in 4100-4899 range to prevent EADDRINUSE on 8080
       const dynamicSafePort = 4100 + Math.floor(Math.random() * 750);
-      const isPython = selectedBot.id === 'python-flask-website' || targetRepo.toLowerCase().includes('python');
 
       const res = await apiRequest<{ bot: Bot; deployment: Deployment }>('/api/bots/deploy', {
         method: 'POST',
         body: JSON.stringify({
           name: (botInstanceName || selectedBot.name).trim(),
           description: selectedBot.description,
-          category: isWebsite ? 'website' : 'whatsapp_bot',
-          runtime: isPython ? 'python' : 'nodejs',
+          runtime: 'nodejs',
           repoUrl: targetRepo,
           branch: branch || 'main',
-          startCommand: startCommand || (isWebsite ? 'node server.js' : 'npm start'),
-          buildCommand: buildCommand || (isWebsite ? 'npm install' : 'npm install'),
+          startCommand: startCommand || 'npm start',
+          buildCommand: buildCommand || 'npm install',
           port: dynamicSafePort,
           region: 'eu-west-2 (London)',
           whatsappAuthMethod: 'pairing_code',
-          whatsappPhone: isWebsite ? '' : ownerNumber.replace(/[^0-9]/g, ''),
+          whatsappPhone: ownerNumber.replace(/[^0-9]/g, ''),
           envVars: envPayload,
           initialFiles,
         }),
@@ -315,7 +298,7 @@ export const DeployWizardPage: React.FC = () => {
                 </h2>
               </div>
               <div className="text-xs font-mono text-slate-400 mt-1 flex flex-wrap items-center gap-2">
-                <span>Instance: {deployedBot.name}</span>
+                <span>Bot: {deployedBot.name}</span>
                 <span>·</span>
                 <span>ID: {deployedBot.id}</span>
                 <span>·</span>
@@ -328,33 +311,6 @@ export const DeployWizardPage: React.FC = () => {
                 )}
               </div>
             </div>
-
-            <div className="flex items-center gap-2">
-              <a
-                href={`/live/${deployedBot.id}/`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-4 py-2 text-xs font-semibold rounded-lg bg-emerald-500 text-slate-950 hover:bg-emerald-400 transition-colors inline-flex items-center gap-1.5 shadow-sm"
-              >
-                <Globe className="w-3.5 h-3.5" />
-                Open Live Website ↗
-              </a>
-            </div>
-          </div>
-
-          <div className="p-3.5 rounded-lg bg-cyan-950/40 border border-cyan-500/30 text-xs text-cyan-200 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Globe className="w-4 h-4 text-cyan-400 shrink-0" />
-              <span>Live Website Proxy URL: <code className="px-2 py-0.5 rounded bg-slate-900 text-white font-mono">{window.location.origin}/live/{deployedBot.id}/</code></span>
-            </div>
-            <button
-              type="button"
-              onClick={() => handleCopySessionUrl(`${window.location.origin}/live/${deployedBot.id}/`)}
-              className="px-2.5 py-1 rounded bg-slate-900 border border-slate-700 text-slate-300 hover:text-white text-xs inline-flex items-center gap-1"
-            >
-              {copiedUrl ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-              Copy URL
-            </button>
           </div>
 
           {activeDeployment.errorMessage && (
@@ -500,58 +456,46 @@ export const DeployWizardPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Need a Session ID Card (Only for WhatsApp Bots) */}
-        {selectedBot.category !== 'website' && (
-          <div className="p-4 rounded-xl bg-[#0d1526] border border-slate-800/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
-                <ExternalLink className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-xs font-bold text-white">Need a Session ID?</div>
-                <div className="text-[11px] text-slate-400">
-                  Get your WhatsApp Session ID or leave blank to use direct Phone Pairing Code
-                </div>
+        {/* Need a Session ID Card */}
+        <div className="p-4 rounded-xl bg-[#0d1526] border border-slate-800/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+              <ExternalLink className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="text-xs font-bold text-white">Need a Session ID?</div>
+              <div className="text-[11px] text-slate-400">
+                Get your WhatsApp Session ID or leave blank to use direct Phone Pairing Code
               </div>
             </div>
+          </div>
 
-            <div className="flex items-center gap-2 self-end sm:self-auto">
-              {selectedBot.sessionGeneratorUrl && (
-                <a
-                  href={selectedBot.sessionGeneratorUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  Get Session ID
-                </a>
-              )}
-              <button
-                type="button"
-                onClick={() => handleCopySessionUrl(selectedBot.sessionGeneratorUrl)}
-                className="p-2 rounded-lg bg-slate-900 border border-slate-700 text-slate-300 hover:text-white transition-colors"
-                title="Copy Session URL"
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            {selectedBot.sessionGeneratorUrl && (
+              <a
+                href={selectedBot.sessionGeneratorUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
               >
-                {copiedUrl ? (
-                  <Check className="w-4 h-4 text-emerald-400" />
-                ) : (
-                  <Copy className="w-4 h-4" />
-                )}
-              </button>
-            </div>
+                <ExternalLink className="w-3.5 h-3.5" />
+                Get Session ID
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={() => handleCopySessionUrl(selectedBot.sessionGeneratorUrl)}
+              className="p-2 rounded-lg bg-slate-900 border border-slate-700 text-slate-300 hover:text-white transition-colors"
+              title="Copy Session URL"
+            >
+              {copiedUrl ? (
+                <Check className="w-4 h-4 text-emerald-400" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
+            </button>
           </div>
-        )}
-
-        {/* Website Overview Banner (For Websites) */}
-        {selectedBot.category === 'website' && (
-          <div className="p-4 rounded-xl bg-cyan-950/30 border border-cyan-500/30 flex items-center gap-3">
-            <Globe className="w-5 h-5 text-cyan-400 shrink-0" />
-            <div className="text-xs text-slate-300">
-              <strong className="text-white">Web Application Hosting:</strong> Your website will be built, assigned an isolated port, and given an instant reverse proxy URL (<code>/live/:id/</code>) with full HTTP and asset support.
-            </div>
-          </div>
-        )}
+        </div>
 
         {error && (
           <div className="p-3.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-xs text-rose-200 flex items-center gap-2.5">
@@ -565,172 +509,93 @@ export const DeployWizardPage: React.FC = () => {
           <div className="p-5 rounded-xl bg-[#0d1526] border border-slate-800/90 space-y-5">
             <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
               <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                <span className="text-rose-400">*</span> {selectedBot.category === 'website' ? 'Website Configuration' : 'Required Configuration'}
+                <span className="text-rose-400">*</span> Required Configuration
               </div>
               <span className="text-[11px] font-medium text-rose-400">Required</span>
             </div>
 
-            {/* Instance Name */}
+            {(selectedBot.id === 'custom-github-bot' || showAdvanced) && (
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-bold text-white">
+                    GITHUB_REPO_URL <span className="text-rose-400">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleRefreshGithubRepos}
+                    className="text-[11px] text-cyan-400 hover:underline flex items-center gap-1"
+                  >
+                    <GitBranch className="w-3 h-3" />
+                    {githubConnectedUser ? 'Choose from my GitHub repos' : 'Connect GitHub OAuth'}
+                  </button>
+                </div>
+                <input
+                  type="url"
+                  required={selectedBot.id === 'custom-github-bot'}
+                  value={customRepoUrl}
+                  onChange={(e) => setCustomRepoUrl(e.target.value)}
+                  placeholder="https://github.com/username/whatsapp-bot"
+                  className="w-full px-3.5 py-2.5 text-xs font-mono bg-[#070b14] border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Repository URL to clone ({branch} branch)
+                </p>
+              </div>
+            )}
+
+            {/* SESSION */}
             <div>
               <label className="block text-xs font-bold text-white mb-1.5">
-                {selectedBot.category === 'website' ? 'Website / App Name' : 'Bot Instance Name'} <span className="text-rose-400">*</span>
+                SESSION <span className="text-rose-400">*</span>
+              </label>
+              <textarea
+                rows={3}
+                value={sessionId}
+                onChange={(e) => setSessionId(e.target.value)}
+                placeholder="Paste your session ID here (or leave blank to generate a live 8-digit Pairing Code after deploy)"
+                className="w-full px-3.5 py-2.5 text-xs font-mono bg-[#070b14] border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              />
+              <p className="text-[11px] text-slate-500 mt-1">
+                Add your session ID here, or leave empty to pair directly via phone number
+              </p>
+            </div>
+
+            {/* DEVICE_MODE */}
+            <div>
+              <label className="block text-xs font-bold text-white mb-1.5">
+                DEVICE_MODE <span className="text-rose-400">*</span>
+              </label>
+              <select
+                value={deviceMode}
+                onChange={(e) => setDeviceMode(e.target.value)}
+                className="w-full px-3.5 py-2.5 text-xs font-mono bg-[#070b14] border border-slate-800 rounded-lg text-white focus:outline-none focus:border-blue-500"
+              >
+                <option value="Android">Android</option>
+                <option value="iPhone">iPhone</option>
+                <option value="Web">Web / Desktop</option>
+              </select>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Device mode: iPhone (plain text) or Android (full features with buttons)
+              </p>
+            </div>
+
+            {/* OWNER_NUMBER */}
+            <div>
+              <label className="block text-xs font-bold text-white mb-1.5">
+                OWNER_NUMBER <span className="text-rose-400">*</span>
               </label>
               <input
                 type="text"
                 required
-                value={botInstanceName}
-                onChange={(e) => setBotInstanceName(e.target.value)}
-                placeholder={selectedBot.name}
-                className="w-full px-3.5 py-2.5 text-xs bg-[#070b14] border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-              />
-            </div>
-
-            {/* Git Repository URL */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-bold text-white">
-                  GITHUB_REPO_URL <span className="text-rose-400">*</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={handleRefreshGithubRepos}
-                  className="text-[11px] text-cyan-400 hover:underline flex items-center gap-1"
-                >
-                  <GitBranch className="w-3 h-3" />
-                  {githubConnectedUser ? 'Choose from my GitHub repos' : 'Connect GitHub OAuth'}
-                </button>
-              </div>
-              <input
-                type="url"
-                required={!customRepoUrl && !selectedBot.repoUrl && initialFiles.length === 0}
-                value={customRepoUrl}
-                onChange={(e) => setCustomRepoUrl(e.target.value)}
-                placeholder="https://github.com/username/my-website"
+                value={ownerNumber}
+                onChange={(e) => setOwnerNumber(e.target.value)}
+                placeholder="254712345678"
                 className="w-full px-3.5 py-2.5 text-xs font-mono bg-[#070b14] border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
               />
               <p className="text-[11px] text-slate-500 mt-1">
-                Repository URL to clone ({branch} branch)
+                Put any phone numbers you want to be bot owner without + or spaces. Ex: 254712345678
               </p>
             </div>
-
-            {/* Git Branch & Commands for Websites */}
-            {selectedBot.category === 'website' ? (
-              <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-white mb-1.5">
-                      Git Branch
-                    </label>
-                    <input
-                      type="text"
-                      value={branch}
-                      onChange={(e) => setBranch(e.target.value)}
-                      placeholder="main"
-                      className="w-full px-3.5 py-2.5 text-xs font-mono bg-[#070b14] border border-slate-800 rounded-lg text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-white mb-1.5">
-                      Start Command
-                    </label>
-                    <input
-                      type="text"
-                      value={startCommand}
-                      onChange={(e) => setStartCommand(e.target.value)}
-                      placeholder="node server.js or npx serve -s dist -l $PORT"
-                      className="w-full px-3.5 py-2.5 text-xs font-mono bg-[#070b14] border border-slate-800 rounded-lg text-white"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-bold text-white">
-                      Build Command (Optional)
-                    </label>
-                    <div className="flex items-center gap-1.5 text-[10px]">
-                      <button
-                        type="button"
-                        onClick={() => setBuildCommand('npm install && npm run build')}
-                        className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 hover:text-white"
-                      >
-                        Vite / React Build
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setBuildCommand('npm install')}
-                        className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 hover:text-white"
-                      >
-                        Node.js Install
-                      </button>
-                    </div>
-                  </div>
-                  <input
-                    type="text"
-                    value={buildCommand}
-                    onChange={(e) => setBuildCommand(e.target.value)}
-                    placeholder="npm install && npm run build"
-                    className="w-full px-3.5 py-2.5 text-xs font-mono bg-[#070b14] border border-slate-800 rounded-lg text-white"
-                  />
-                </div>
-              </>
-            ) : (
-              <>
-                {/* SESSION */}
-                <div>
-                  <label className="block text-xs font-bold text-white mb-1.5">
-                    SESSION <span className="text-rose-400">*</span>
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={sessionId}
-                    onChange={(e) => setSessionId(e.target.value)}
-                    placeholder="Paste your session ID here (or leave blank to generate a live 8-digit Pairing Code after deploy)"
-                    className="w-full px-3.5 py-2.5 text-xs font-mono bg-[#070b14] border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                  />
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Add your session ID here, or leave empty to pair directly via phone number
-                  </p>
-                </div>
-
-                {/* DEVICE_MODE */}
-                <div>
-                  <label className="block text-xs font-bold text-white mb-1.5">
-                    DEVICE_MODE <span className="text-rose-400">*</span>
-                  </label>
-                  <select
-                    value={deviceMode}
-                    onChange={(e) => setDeviceMode(e.target.value)}
-                    className="w-full px-3.5 py-2.5 text-xs font-mono bg-[#070b14] border border-slate-800 rounded-lg text-white focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="Android">Android</option>
-                    <option value="iPhone">iPhone</option>
-                    <option value="Web">Web / Desktop</option>
-                  </select>
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Device mode: iPhone (plain text) or Android (full features with buttons)
-                  </p>
-                </div>
-
-                {/* OWNER_NUMBER */}
-                <div>
-                  <label className="block text-xs font-bold text-white mb-1.5">
-                    OWNER_NUMBER <span className="text-rose-400">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={ownerNumber}
-                    onChange={(e) => setOwnerNumber(e.target.value)}
-                    placeholder="254712345678"
-                    className="w-full px-3.5 py-2.5 text-xs font-mono bg-[#070b14] border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                  />
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Put any phone numbers you want to be bot owner without + or spaces. Ex: 254712345678
-                  </p>
-                </div>
-              </>
-            )}
 
             {/* Optional Advanced Toggle */}
             <div className="pt-2 border-t border-slate-800/80">
@@ -948,67 +813,27 @@ export const DeployWizardPage: React.FC = () => {
         </div>
       )}
 
-      {/* Category Tab Switcher: WhatsApp Bots vs Websites & Web Services */}
-      <div className="flex flex-wrap items-center gap-2.5 border-b border-slate-800 pb-3">
-        <button
-          type="button"
-          onClick={() => setActiveCatalogTab('bots')}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
-            activeCatalogTab === 'bots'
-              ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
-              : 'bg-[#0d1526] border border-slate-800 text-slate-400 hover:text-white'
-          }`}
-        >
-          <span>🤖</span>
-          <span>WhatsApp Bots ({BOT_CATALOG.length})</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveCatalogTab('websites')}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
-            activeCatalogTab === 'websites'
-              ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/20 font-bold'
-              : 'bg-[#0d1526] border border-slate-800 text-slate-400 hover:text-white'
-          }`}
-        >
-          <Globe className="w-3.5 h-3.5" />
-          <span>Websites & Web Apps ({WEBSITE_CATALOG.length})</span>
-        </button>
-      </div>
-
-      {/* Available Catalog Section */}
+      {/* Available Bots Section */}
       <div className="space-y-4">
         <div>
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
-            {activeCatalogTab === 'websites' ? (
-              <>
-                <Globe className="w-5 h-5 text-cyan-400" />
-                <span>Websites & Web Application Presets</span>
-              </>
-            ) : (
-              <span>Available WhatsApp Bots</span>
-            )}
-          </h2>
+          <h2 className="text-lg font-bold text-white">Available Bots</h2>
           <p className="text-xs text-slate-400">
-            {activeCatalogTab === 'websites'
-              ? 'Deploy full-stack Node.js, React/Vite, HTML5 static sites, or Python Flask/FastAPI web apps with instant live preview.'
-              : `${BOT_CATALOG.length} multi-device WhatsApp bots ready for instant free deployment.`}
+            {BOT_CATALOG.length} bots ready for instant free deployment
           </p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {(activeCatalogTab === 'websites' ? WEBSITE_CATALOG : BOT_CATALOG).map((item) => (
+          {BOT_CATALOG.map((bot) => (
             <div
-              key={item.id}
+              key={bot.id}
               className="rounded-2xl bg-[#0d1526] border border-slate-800/90 overflow-hidden flex flex-col justify-between hover:border-blue-500/50 transition-all group"
             >
               <div>
                 {/* Artwork Container */}
                 <div className="relative aspect-[4/3] w-full bg-slate-950 overflow-hidden">
                   <img
-                    src={item.image}
-                    alt={item.name}
+                    src={bot.image}
+                    alt={bot.name}
                     referrerPolicy="no-referrer"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                   />
@@ -1017,30 +842,30 @@ export const DeployWizardPage: React.FC = () => {
                   {/* Top Left Rank & Top Right Deploy Count */}
                   <div className="absolute top-3 left-3 right-3 flex items-center justify-between text-xs font-mono font-bold">
                     <span className="px-2 py-0.5 rounded bg-amber-500 text-slate-950">
-                      #{item.rank}
+                      #{bot.rank}
                     </span>
                     <span className="px-2 py-0.5 rounded bg-slate-950/80 text-slate-200 tabular-nums">
-                      {item.deploymentsCount}
+                      {bot.deploymentsCount}
                     </span>
                   </div>
 
                   {/* Featured Ribbon */}
-                  {item.featuredLabel && (
+                  {bot.featuredLabel && (
                     <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 py-1 text-center text-[10px] font-extrabold tracking-wider text-white uppercase">
-                      {item.featuredLabel}
+                      {bot.featuredLabel}
                     </div>
                   )}
                 </div>
 
                 {/* Card Body */}
                 <div className="p-4 space-y-2">
-                  <h3 className="text-base font-bold text-white">{item.name}</h3>
+                  <h3 className="text-base font-bold text-white">{bot.name}</h3>
                   <div className="text-xs text-slate-400 flex items-center gap-1.5">
                     <UserIcon className="w-3.5 h-3.5 text-slate-500" />
-                    <span>{item.author}</span>
+                    <span>{bot.author}</span>
                   </div>
                   <p className="text-xs text-slate-300 line-clamp-2 leading-relaxed pt-1">
-                    {item.description}
+                    {bot.description}
                   </p>
                 </div>
               </div>
@@ -1055,14 +880,10 @@ export const DeployWizardPage: React.FC = () => {
 
                 <button
                   type="button"
-                  onClick={() => handleSelectBot(item)}
-                  className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap ${
-                    item.category === 'website'
-                      ? 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold'
-                      : 'bg-blue-600 hover:bg-blue-500 text-white'
-                  }`}
+                  onClick={() => handleSelectBot(bot)}
+                  className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
                 >
-                  <span>{item.category === 'website' ? 'Deploy Website' : 'Deploy Bot'}</span>
+                  <span>Deploy</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
